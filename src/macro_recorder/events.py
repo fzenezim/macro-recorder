@@ -106,7 +106,7 @@ class Recording:
     # ── serialização ───────────────────────────────────────────────────────
     def to_dict(self) -> dict:
         return {
-            "created_at": self.created_at,
+            "created_at": self.created_at.isoformat() if hasattr(self.created_at, "isoformat") else self.created_at,
             "duration_s": self.duration_s,
             "steps": [s.to_dict() for s in self.steps],
             "meta": self.meta,
