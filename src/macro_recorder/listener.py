@@ -497,3 +497,59 @@ def run_record() -> int:
     export_replay_py(recording, out)
     print(f"[mrec] OK: {out}/{'passo-a-passo.md', 'replay.py'}".replace("{'", "").replace("', '", "").replace("'}", ""))
     return 0
+
+
+def run_record() -> int:
+    """Grava uma macro e para em F9. Retorna 0 sucesso, 1 abortado."""
+    import os
+    from datetime import datetime
+    from pathlib import Path
+
+    hotkey = os.environ.get("MREC_HOTKEY", "f9").lower()
+    print(f"[mrec] pressao {hotkey.upper()} para começar / parar a gravação")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path("recordings") / ts
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "assets").mkdir(exist_ok=True)
+
+    try:
+        rec = Recorder(out_dir=out_dir, hotkey=hotkey)
+        rec.start()
+        # espera user apertar F9 para parar
+        print("[mrec] rec gravando... (F9 = parar e salvar)")
+        import time
+        while rec.recording is None:
+            time.sleep(0.1)
+        steps = rec.stop()
+    except KeyboardInterrupt:
+        print("\n[mrec] interrupcao — cancelando")
+        return 1
+    except Exception as e:
+        print(f"[mrec] erro: {e}")
+        return 1
+
+    # salva tudo
+    import json
+    rec_obj = Recording(
+        created_at=datetime.now(),
+        duration_s=round(sum(s.t for s in steps) if steps else 0.0, 3),
+        steps=steps,
+        meta={"name": ts, "device": "pynput", "hotkey": hotkey},
+    )
+    rec_path = out_dir / "recording.json"
+    rec_path.write_text(json.dumps(rec_obj.to_dict(), indent=2), encoding="utf-8")
+
+    # exporta MD e PY
+    import macro_recorder.exporter_md as md
+    import macro_recorder.exporter_py as pyexp
+    from pathlib import Path
+    md.export_md(rec_obj, steps, out_dir / "passo-a-passo.md")
+    pyexp.export_py(steps, out_dir / "replay.py")
+
+    print(f"\n[mrec] ok! {len(steps)} passos salvos em {out_dir}/")
+    print(f"  - {rec_path.name}")
+    print(f"  - passo-a-passo.md")
+    print(f"  - replay.py")
+    print(f"  - assets/ ({len([s.crop for s in steps if s.crop])} crops)")
+    return 0

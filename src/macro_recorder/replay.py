@@ -68,3 +68,9 @@ def replay_from_dir(record_dir: Path, dry_run: bool = False,
         print(result.stderr, file=sys.stderr)
 
     return result.returncode
+
+
+def run_replay(folder: str, dry_run: bool = False) -> int:
+    """Executa o replay da pasta informada."""
+    from pathlib import Path
+    return replay_from_dir(Path(folder), dry_run=dry_run)
