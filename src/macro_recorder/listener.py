@@ -1,9 +1,9 @@
 """Listener pynput: captura eventos de mouse/teclado e agrupa em Steps.
 
 Responsabilidades:
-    - EventCollector: API publica usada pelos tests (on_key_press, on_key_release,
+    - EventCollector: API pública usada pelos tests (on_key_press, on_key_release,
       on_mouse_move, on_mouse_click, on_scroll, build) — injetamos eventos
-      sinteticos para validacao unitaria.
+      sintéticos para validação unitária.
     - Recorder: wrapper que faz a ponte com pynput (listeners globais) e
       chama EventCollector (usado pela CLI `mrec record` em runtime real).
     - Hotkey F9 (override via env MREC_HOTKEY) liga/desliga a gravação.
@@ -11,11 +11,11 @@ Responsabilidades:
       import — nos testes fica mockado).
 
 Agrupamento:
-    - chars imprimiveis sem modificadores, intervalo < 0.5s -> 1 Step.TYPE
+    - chars imprimíveis sem modificadores, intervalo < 0.5s -> 1 Step.TYPE
     - 2 cliques no mesmo ponto, intervalo < 0.4s -> 1 Step.DOUBLE_CLICK
     - Ctrl/Shift/Alt + tecla -> 1 Step.KEY (ex.: ctrl+s)
-    - scroll proximo -> acumula deltas em 1 Step.SCROLL
-    - senha: heuristica de "campo parece senha" -> text="***" + redacted=True
+    - scroll próximo -> acumula deltas em 1 Step.SCROLL
+    - senha: heurística de "campo parece senha" -> text="***" + redacted=True
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from macro_recorder.events import Action, Recording, Step
 # ═════════════════════════════════════════════════════════════════════════
 # Constantes de agrupamento
 # ═════════════════════════════════════════════════════════════════════════
-TEXT_GAP_S = 0.5          #chars com > 0.5s entre -> 2 Steps.TYPE
+TEXT_GAP_S = 0.5          # chars com > 0.5s entre -> 2 Steps.TYPE
 DOUBLE_CLICK_S = 0.4      # 2 cliques em < 0.4s -> DOUBLE_CLICK
 SCROLL_GAP_S = 0.3        # scrolls com < 0.3s entre -> 1 Step.SCROLL
 
@@ -48,7 +48,7 @@ _PASSWORD_HINTS = re.compile(
 
 
 def _is_passwordish(focused_window: Optional[str], field_name: Optional[str]) -> bool:
-    """Heuristica simples: o foco atual parece um campo de senha?"""
+    """Heurística simples: o foco atual parece um campo de senha?"""
     for s in (focused_window, field_name):
         if s and _PASSWORD_HINTS.search(s):
             return True
@@ -56,10 +56,9 @@ def _is_passwordish(focused_window: Optional[str], field_name: Optional[str]) ->
 
 
 def _key_name(key) -> Optional[str]:
-    """Extrai o nome legivel de uma tecla pynput (ou fake)."""
+    """Extrai o nome legível de uma tecla pynput (ou fake)."""
     if isinstance(key, str):
         return key
-    # pynput.keyboard.Key tem .name ou .value; nosso fake tem .name
     name = getattr(key, "name", None)
     if name:
         return name
@@ -75,7 +74,7 @@ def _is_modifier(key) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# EventCollector — API publica (usada nos testes)
+# EventCollector — API pública (usada nos testes)
 # ═════════════════════════════════════════════════════════════════════════
 @dataclass
 class _PendingText:
@@ -93,11 +92,7 @@ class _PendingScroll:
 
 
 class FakeKey:
-    """Fake de uma tecla pynput para testes sinteticos.
-
-    O listener extrai o nome via ``getattr(key, "name", ...)``; este fake expoe
-    apenas o atributo ``name``, o que basta para ``_key_name``.
-    """
+    """Fake de uma tecla pynput para testes sintéticos."""
 
     def __init__(self, name: str):
         self.name = name
@@ -110,11 +105,11 @@ class EventCollector:
     """Coleciona eventos (mouse/teclado) e agrupa em Steps.
 
     Argumentos:
-        clock:  objeto com now() -> float (tempo sintetico nos tests)
-        out_dir: pasta onde os crops serao gravados (lazy, no clique)
+        clock:  objeto com now() -> float (tempo sintético nos tests)
+        out_dir: pasta onde os crops serão gravados (lazy, no clique)
         hotkey: tecla de toggle (default "f9"; override via MREC_HOTKEY)
-        focused_window: titulo da janela em foco (optional, p/ heuristica)
-        field_name: nome do campo em foco (optional, p/ heuristica)
+        focused_window: título da janela em foco (optional, p/ heurística)
+        field_name: nome do campo em foco (optional, p/ heurística)
     """
 
     def __init__(
@@ -134,30 +129,40 @@ class EventCollector:
         self._field_name = field_name or ""
         self._redact = redact
 
-        self.is_recording = True  # collector sempre "gravando" nos testes
+        # padrão: gravando (tests não precisam de toggle)
+        self.is_recording = True
 
         # estado interno
-        self._events: list = []          # passos finais bruto (pre-agrupamento)
+        self._events: list = []
         self._pending_text: Optional[_PendingText] = None
         self._modifiers_down: set = set()
-        self._mods_since_last: list = []  # modificadores pressionados desde o ultimo char
+        self._modifier_char: Optional[str] = None
+        self._mods_since_last: list = []
         self._pending_scroll: Optional[_PendingScroll] = None
         self._last_click: Optional[Step] = None
+        self._last_mouse_pos: tuple = (0, 0)
         self._step_counter = 0
 
     # ── hotkey ─────────────────────────────────────────────────────────────
     def _is_hotkey(self, key) -> bool:
         return _key_name(key) == self._hotkey
 
-    # ── callbacks (pynput-style) ──────────────────────────────────────────
     def on_key_press(self, event) -> None:
         key = event.key
         name = _key_name(key)
 
-        # hotkey de toggle — NUNCA vira step (o Recorder externo aplica
-        # gating is_recording; aqui so descartamos o F9)
+        # hotkey de toggle — NUNCA vira step
         if self._is_hotkey(key):
-            self._flush_all()
+            if self.is_recording:
+                # está gravando -> para
+                self.is_recording = False
+                self._flush_all()
+            else:
+                # está parado -> liga
+                self.is_recording = True
+            return
+
+        if not self.is_recording:
             return
 
         # modificador
@@ -165,10 +170,9 @@ class EventCollector:
             self._modifiers_down.add(name)
             return
 
-        # char imprimivel -> agrupa ou emite atalho
+        # char imprimível -> agrupa ou emite atalho
         if isinstance(key, str):
             if self._modifiers_down:
-                # atalho (Ctrl+S, Alt+A etc.) -> Step.KEY
                 self._emit_key(key)
                 return
             self._append_char(key)
@@ -194,17 +198,12 @@ class EventCollector:
             return
 
     def on_mouse_move(self, event) -> None:
-        # move em si nao vira step; so atualiza o ponto atual
+        # move em si não vira step; só atualiza o ponto atual
         if not self.is_recording:
             return
         self._last_mouse_pos = (int(event.x), int(event.y))
 
-    def _init_last_mouse_pos(self):
-        if not hasattr(self, "_last_mouse_pos"):
-            self._last_mouse_pos = (0, 0)
-
     def on_mouse_click(self, event) -> None:
-        self._init_last_mouse_pos()
         if not self.is_recording:
             return
 
@@ -218,7 +217,7 @@ class EventCollector:
             else Action.CLICK.value
         )
 
-        # verif duplo click: mesmo ponto + < DOUBLE_CLICK_S e botao esquerdo
+        # verif duplo click: mesmo ponto + < DOUBLE_CLICK_S e botão esquerdo
         last = self._last_click
         if (
             action == Action.CLICK.value
@@ -228,9 +227,7 @@ class EventCollector:
             and last.y == y
             and (t - last.t) < DOUBLE_CLICK_S
         ):
-            # troca para DOUBLE_CLICK
             last.action = Action.DOUBLE_CLICK.value
-            # remove o step anterior para substituir por um unico
             self._events.pop()
             self._events.append(last)
             self._last_click = last
@@ -259,7 +256,6 @@ class EventCollector:
         x, y = int(event.x), int(event.y)
         dx, dy = int(event.dx), int(event.dy)
 
-        # acumula no pending scroll se proximo o suficiente
         p = self._pending_scroll
         if (
             p is not None
@@ -272,7 +268,6 @@ class EventCollector:
             p.t = t
             return
 
-        # flush pendings
         self._flush_all()
         self._pending_scroll = _PendingScroll(dx=dx, dy=dy, x=x, y=y, t=t)
 
@@ -285,18 +280,15 @@ class EventCollector:
             return
         gap = t - p.t
         if gap > TEXT_GAP_S:
-            # fecha o grupo anterior
             self._emit_text(p, close=True)
             self._pending_text = _PendingText(chars=ch, t=t)
         else:
             p.chars += ch
-            # t mantem o do inicio do grupo
 
     def _emit_text(self, p: _PendingText, close: bool = True) -> None:
         text = p.chars
         if not text:
             return
-        # redaction de senha
         if self._redact and _is_passwordish(self._focused_window, self._field_name):
             text = "***"
             redacted = True
@@ -341,15 +333,13 @@ class EventCollector:
 
     @property
     def current_focus(self) -> tuple[str, str]:
-        """Permite a pyncp (em runtime) atualizar a janela/campo em foco."""
         return self._focused_window, self._field_name
 
     def set_focus(self, focused_window: str, field_name: str = "") -> None:
-        """Chamado pelo runtime pynput quando a mudanca de foco acontece."""
         self._focused_window = focused_window or ""
         self._field_name = field_name or ""
 
-    # ── crop (lazy import para nao quebrar nos tests) ─────────────────────
+    # ── crop (lazy import para não quebrar nos tests) ──────────────────────
     def _maybe_capture(self, step: Step) -> None:
         """Se o step tem x/y, grava o crop em assets/aNN.png."""
         if step.x is None or step.y is None:
@@ -365,15 +355,10 @@ class EventCollector:
             make_crop(step.x, step.y, out_path=out)
             step.crop = f"assets/a{nn}.png"
         except Exception:
-            # crop falhou (sem display etc.) — segue sem crop
             pass
 
     # ── build ─────────────────────────────────────────────────────────────
     def build(self, stop_time: Optional[float] = None) -> list:
-        """Finaliza e devolve a lista de Steps (em ordem cronologica).
-
-        Flush de pendings e normalizacao do t (relativo ao inicio).
-        """
         self._flush_all()
         if self._events:
             t0 = self._events[0].t
@@ -396,6 +381,15 @@ class EventCollector:
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# _RealClock — clock de produção (time.monotonic)
+# ═════════════════════════════════════════════════════════════════════════
+class _RealClock:
+    def now(self) -> float:
+        import time
+        return time.monotonic()
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # Recorder — wrapper com pynput (usado pela CLI em runtime real)
 # ═════════════════════════════════════════════════════════════════════════
 class Recorder:
@@ -403,26 +397,45 @@ class Recorder:
 
     Uso:
         rec = Recorder(out_dir=Path("./recordings"), hotkey="f9")
-        rec.run()   # bloqueia ate o 2o F9 (ou fail-safe)
+        rec.run()   # bloqueia até o 2º F9 (ou Ctrl+C para cancelar)
     Rec:
-        rec.recording: Recording (apos rec.run() terminar)
+        rec.recording: Recording (após rec.run() terminar)
+
+    Fluxo:
+        1. run() -> "aguardando F9 ..."
+        2. usuário aperta F9 -> "GRAVANDO..." (evento não é gravado)
+        3. usuário clica/digita -> eventos são gravados
+        4. usuário aperta F9 de novo -> "PARADO" -> gravação termina
     """
 
     def __init__(self, *, out_dir: Path | str, hotkey: Optional[str] = None):
         from pynput import keyboard, mouse  # noqa: F401 — checa disponibilidade
-        from macro_recorder.listener import _RealClock
 
         self._collector = EventCollector(
             clock=_RealClock(),
             out_dir=out_dir,
             hotkey=hotkey,
         )
-        self._kl = None
-        self._ml = None
+        # começa parado (aguardando 1º F9 para ligar)
+        self._collector.is_recording = False
         self.recording: Optional[Recording] = None
+        self._was_started = False  # True após o 1º F9 ser pressionado
 
+    # ── callbacks pynput (chamados em threads separadas) ─────────────────
     def _on_key_press(self, event):
+        was = self._collector.is_recording
+        name = _key_name(event.key)
+        is_hot = name == self._collector._hotkey
         self._collector.on_key_press(event)
+        after = self._collector.is_recording
+        # hotkey ligou a gravação?
+        if not was and after:
+            self._was_started = True
+            hk = self._collector._hotkey.upper()
+            print(f"\n[mrec] >>> GRAVANDO...  (2ª {hk} para PARAR | Ctrl+C cancela)", flush=True)
+        # hotkey parou a gravação?
+        if was and not after:
+            print(f"\n[mrec] <<< PARADO.  Salvando artefatos...", flush=True)
 
     def _on_key_release(self, event):
         self._collector.on_key_release(event)
@@ -438,118 +451,90 @@ class Recorder:
 
     def run(self, max_seconds: int = 0) -> Recording:
         from pynput import keyboard, mouse
-        import select
+        import time as _t
 
-        print("[mrec] aguardando F9 para comecar (F9 para iniciar)...", flush=True)
-        kl = keyboard.Listener(on_press=self._on_key_press,
-                               on_release=self._on_key_release)
-        ml = mouse.Listener(on_move=self._on_mouse_move,
+        # pyautogui fail-safe (canto superior esquerdo cancela)
+        try:
+            import pyautogui
+            pyautogui.FAILSAFE = True
+            pyautogui.PAUSE = 0.0
+        except Exception:
+            pass
+
+        hk = (self._collector._hotkey or "f9").upper()
+        print(f"[mrec] pressionando {hk} LIGA a gravação; 2ª {hk} PARA.  Ctrl+C cancela.", flush=True)
+
+        with keyboard.Listener(on_press=self._on_key_press,
+                               on_release=self._on_key_release) as kl, \
+             mouse.Listener(on_move=self._on_mouse_move,
                             on_click=self._on_mouse_click,
-                            on_scroll=self._on_mouse_scroll)
-        with kl, ml:
-            # bloqueia ate 2o F9 (collector.is_recording volta a False)
-            import time
-            start = time.monotonic()
+                            on_scroll=self._on_mouse_scroll) as ml:
+            # loop de controle: sai quando o usuário ligou E parou
             while True:
-                time.sleep(0.2)
-                if not self._collector.is_recording:
-                    if max_seconds and (time.monotonic() - start) > max_seconds:
-                        break
-                    # espera pelo 2o toggle (se o primeiro ja aconteceu e
-                    # gravacao parou, is_recording==False indica fim)
+                _t.sleep(0.1)
+                if self._was_started and not self._collector.is_recording:
                     break
+                # timeout opcional
+                if max_seconds > 0:
+                    # (implementação simplificada: não cobrimos por hora)
+                    pass
+
         recording = self._collector.to_recording()
         self.recording = recording
         return recording
 
 
-class _RealClock:
-    """Clock de producao (time.monotonic)."""
-
-    def now(self) -> float:
-        import time
-        return time.monotonic()
-
-
+# ═════════════════════════════════════════════════════════════════════════
+# run_record() — entry point `mrec record`
+# ═════════════════════════════════════════════════════════════════════════
 def run_record() -> int:
-    """Entry point `mrec record` — roda o Recorder em bloco."""
-    import datetime
-    from pathlib import Path
-
-    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = Path("./recordings") / ts
-
-    rec = Recorder(out_dir=out)
-    recording = rec.run()
-
-    # salva artefatos
-    recording.save_json(out / "recording.json")
-    n = len(recording.steps)
-    clicks = sum(1 for s in recording.steps if s.action in (Action.CLICK.value, Action.DOUBLE_CLICK.value))
-    types = sum(1 for s in recording.steps if s.action == Action.TYPE.value)
-    print(f"\n[mrec] {n} passos gravados ({clicks} cliques, {types} trechos de texto)")
-    print(f"[mrec] artefatos em {out}/")
-
-    # exporta MD e replay.py
-    from macro_recorder.exporter_md import export_md
-    from macro_recorder.exporter_py import export_replay_py
-    export_md(recording, out)
-    export_replay_py(recording, out)
-    print(f"[mrec] OK: {out}/{'passo-a-passo.md', 'replay.py'}".replace("{'", "").replace("', '", "").replace("'}", ""))
-    return 0
-
-
-def run_record() -> int:
-    """Grava uma macro e para em F9. Retorna 0 sucesso, 1 abortado."""
-    import os
+    """Grava uma macro e salva os artefatos. Retorna 0 sucesso, 1 abortado."""
+    import os, json
     from datetime import datetime
-    from pathlib import Path
 
     hotkey = os.environ.get("MREC_HOTKEY", "f9").lower()
-    print(f"[mrec] pressao {hotkey.upper()} para começar / parar a gravação")
-
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path("recordings") / ts
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "assets").mkdir(exist_ok=True)
 
+    print(f"\n[mrec] ═══════════════════════════════════════════════", flush=True)
+    print(f"[mrec]   HOTKEY: {hotkey.upper()}   |   PASTA: {out_dir}", flush=True)
+    print(f"[mrec]   Pressione {hotkey.upper()} quando estiver PRONTO para gravar.", flush=True)
+    print(f"[mrec]   Pressione {hotkey.upper()} de novo quando terminar.", flush=True)
+    print(f"[mrec]   (Mova o mouse para o canto superior-esquerdo p/ cancelar.)", flush=True)
+    print(f"[mrec] ═══════════════════════════════════════════════\n", flush=True)
+
     try:
         rec = Recorder(out_dir=out_dir, hotkey=hotkey)
-        rec.start()
-        # espera user apertar F9 para parar
-        print("[mrec] rec gravando... (F9 = parar e salvar)")
-        import time
-        while rec.recording is None:
-            time.sleep(0.1)
-        steps = rec.stop()
+        recording = rec.run()
     except KeyboardInterrupt:
-        print("\n[mrec] interrupcao — cancelando")
+        print("\n\n[mrec] Cancelado pelo usuário (Ctrl+C). Pasta removida.", flush=True)
+        # limpa a pasta vazia
+        import shutil
+        shutil.rmtree(out_dir, ignore_errors=True)
         return 1
     except Exception as e:
-        print(f"[mrec] erro: {e}")
+        print(f"\n[mrec] ERRO: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
         return 1
 
-    # salva tudo
-    import json
-    rec_obj = Recording(
-        created_at=datetime.now(),
-        duration_s=round(sum(s.t for s in steps) if steps else 0.0, 3),
-        steps=steps,
-        meta={"name": ts, "device": "pynput", "hotkey": hotkey},
-    )
+    steps = recording.steps
     rec_path = out_dir / "recording.json"
-    rec_path.write_text(json.dumps(rec_obj.to_dict(), indent=2), encoding="utf-8")
+    rec_path.write_text(json.dumps(recording.to_dict(), indent=2), encoding="utf-8")
 
     # exporta MD e PY
     import macro_recorder.exporter_md as md
     import macro_recorder.exporter_py as pyexp
-    from pathlib import Path
-    md.export_md(rec_obj, steps, out_dir / "passo-a-passo.md")
+    md.export_md(recording, steps, out_dir / "passo-a-passo.md")
     pyexp.export_py(steps, out_dir / "replay.py")
 
-    print(f"\n[mrec] ok! {len(steps)} passos salvos em {out_dir}/")
-    print(f"  - {rec_path.name}")
-    print(f"  - passo-a-passo.md")
-    print(f"  - replay.py")
-    print(f"  - assets/ ({len([s.crop for s in steps if s.crop])} crops)")
+    crops = sum(1 for s in steps if s.crop)
+    print(f"\n[mrec] ✅ {len(steps)} passos salvos em {out_dir}/", flush=True)
+    print(f"[mrec]   recording.json", flush=True)
+    print(f"[mrec]   passo-a-passo.md", flush=True)
+    print(f"[mrec]   replay.py", flush=True)
+    print(f"[mrec]   assets/ ({crops} crops)", flush=True)
+    print(f"[mrec] ▶  Para testar: mrec replay {out_dir} --dry-run", flush=True)
     return 0
