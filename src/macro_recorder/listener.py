@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -59,10 +60,16 @@ def _key_name(key) -> Optional[str]:
     """Extrai o nome legível de uma tecla pynput (ou fake)."""
     if isinstance(key, str):
         return key
+    # KeyCode de char tem .char (o próprio char)
+    char = getattr(key, "char", None)
+    if char is not None and isinstance(char, str):
+        return char
+    value = getattr(key, "value", None)
+    if value is not None and isinstance(value, str):
+        return value
     name = getattr(key, "name", None)
     if name:
         return name
-    value = getattr(key, "value", None)
     if value is not None:
         return str(value)
     return None
@@ -71,6 +78,18 @@ def _key_name(key) -> Optional[str]:
 def _is_modifier(key) -> bool:
     n = _key_name(key)
     return n in MODIFIERS
+
+
+def _char_of(key) -> Optional[str]:
+    """Retorna o char imprimível da tecla (KeyCode de char / str) ou None."""
+    if isinstance(key, str):
+        ch = key
+        return ch if len(ch) == 1 else None
+    # KeyCode de char tem .char (o próprio char)
+    char = getattr(key, "char", None)
+    if char is not None and isinstance(char, str) and len(char) == 1:
+        return char
+    return None
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -121,6 +140,12 @@ class EventCollector:
         focused_window: Optional[str] = None,
         field_name: Optional[str] = None,
         redact: bool = True,
+        capture_text: bool = True,
+        capture_clicks: bool = True,
+        capture_scroll: bool = True,
+        capture_focus: bool = True,
+        is_recording: bool = False,
+        on_state_change=None,
     ):
         self._clock = clock
         self._out_dir = Path(out_dir)
@@ -128,9 +153,15 @@ class EventCollector:
         self._focused_window = focused_window or ""
         self._field_name = field_name or ""
         self._redact = redact
+        self.capture_text = capture_text
+        self.capture_clicks = capture_clicks
+        self.capture_scroll = capture_scroll
+        self.capture_focus = capture_focus
+        self._on_state_change = on_state_change  # callback(recording: bool)
 
-        # padrão: gravando (tests não precisam de toggle)
-        self.is_recording = True
+        # Inicia PARADO por padrão (runtime real: o hotkey F9 o liga na 1a
+        # tecla). Tests sintéticos passam is_recording=True explicitamente.
+        self.is_recording = bool(is_recording)
 
         # estado interno
         self._events: list = []
@@ -147,6 +178,15 @@ class EventCollector:
     def _is_hotkey(self, key) -> bool:
         return _key_name(key) == self._hotkey
 
+    def _notify_state(self) -> None:
+        """Callback opcional quando o is_recording muda (F9)."""
+        if self._on_state_change is None:
+            return
+        try:
+            self._on_state_change(self.is_recording)
+        except Exception:
+            pass
+
     def on_key_press(self, event) -> None:
         key = event.key
         name = _key_name(key)
@@ -160,6 +200,7 @@ class EventCollector:
             else:
                 # está parado -> liga
                 self.is_recording = True
+            self._notify_state()
             return
 
         if not self.is_recording:
@@ -171,11 +212,14 @@ class EventCollector:
             return
 
         # char imprimível -> agrupa ou emite atalho
-        if isinstance(key, str):
+        ch = _char_of(key)
+        if ch is not None:
             if self._modifiers_down:
-                self._emit_key(key)
+                self._emit_key(ch)
                 return
-            self._append_char(key)
+            if not self.capture_text:
+                return
+            self._append_char(ch)
             return
 
         # tecla especial (enter, tab, f5, ...)
@@ -205,6 +249,8 @@ class EventCollector:
 
     def on_mouse_click(self, event) -> None:
         if not self.is_recording:
+            return
+        if not self.capture_clicks:
             return
 
         x, y = int(event.x), int(event.y)
@@ -251,6 +297,8 @@ class EventCollector:
 
     def on_scroll(self, event) -> None:
         if not self.is_recording:
+            return
+        if not self.capture_scroll:
             return
         t = self._clock.now()
         x, y = int(event.x), int(event.y)
@@ -390,6 +438,29 @@ class _RealClock:
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# _KeyEvent — adaptador: pynput passa a tecla "solta"; o EventCollector espera
+# um objeto com .key (contrato dos tests sintéticos).
+# ═════════════════════════════════════════════════════════════════════════
+class _KeyEvent:
+    """Wrapper mínimo: expõe .key como o contrato do EventCollector."""
+    __slots__ = ("key",)
+    def __init__(self, key):
+        self.key = key
+
+
+class _MouseEvent:
+    """Adapter da assinatura pynput (x, y, button, pressed[, dx, dy]) para o
+    shape .x / .y / .button / .dx / .dy que o EventCollector consome."""
+    __slots__ = ("x", "y", "button", "dx", "dy")
+    def __init__(self, x, y, button=None, dx=0, dy=0):
+        self.x = x
+        self.y = y
+        self.button = button
+        self.dx = dx
+        self.dy = dy
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # Recorder — wrapper com pynput (usado pela CLI em runtime real)
 # ═════════════════════════════════════════════════════════════════════════
 class Recorder:
@@ -408,46 +479,181 @@ class Recorder:
         4. usuário aperta F9 de novo -> "PARADO" -> gravação termina
     """
 
-    def __init__(self, *, out_dir: Path | str, hotkey: Optional[str] = None):
+    def __init__(
+        self,
+        *,
+        out_dir: Path | str,
+        hotkey: Optional[str] = None,
+        capture_text: bool = True,
+        capture_clicks: bool = True,
+        capture_scroll: bool = True,
+        capture_focus: bool = True,
+        on_state_change=None,
+    ):
         from pynput import keyboard, mouse  # noqa: F401 — checa disponibilidade
+
+        self._capture_focus = capture_focus
+        self._on_state_change = on_state_change  # callback(is_recording: bool)
 
         self._collector = EventCollector(
             clock=_RealClock(),
             out_dir=out_dir,
             hotkey=hotkey,
+            capture_text=capture_text,
+            capture_clicks=capture_clicks,
+            capture_scroll=capture_scroll,
+            capture_focus=capture_focus,
+            on_state_change=self._on_state_change,
         )
         # começa parado (aguardando 1º F9 para ligar)
         self._collector.is_recording = False
         self.recording: Optional[Recording] = None
         self._was_started = False  # True após o 1º F9 ser pressionado
+        # toggle programático: GUI/teste chama rec.toggle() para virar o estado
+        # do hotkey sem depender de eventos de teclado reais (pynput injetados
+        # não são vistos pelo hook global do mesmo processo no Windows).
+        self._toggle_event: threading.Event = threading.Event()
+        self._running = False
+
+    def toggle(self) -> bool:
+        """Aciona o toggle do hotkey (mesmo efeito de apertar F9).
+
+        Thread-safe: qualquer thread pode chamar. O loop do run() consome o
+        evento e dispara o mesmo tratamento do EventCollector.on_key_press
+        para a tecla do hotkey.
+        """
+        self._toggle_event.set()
+        return self._collector.is_recording
 
     # ── callbacks pynput (chamados em threads separadas) ─────────────────
-    def _on_key_press(self, event):
-        was = self._collector.is_recording
-        name = _key_name(event.key)
-        is_hot = name == self._collector._hotkey
-        self._collector.on_key_press(event)
-        after = self._collector.is_recording
-        # hotkey ligou a gravação?
-        if not was and after:
-            self._was_started = True
+    def _notify(self):
+        if self._on_state_change:
+            try:
+                self._on_state_change(self._collector.is_recording)
+            except Exception:
+                pass
+
+    def _on_key_press(self, key, *a):
+        """pynput: on_press(key[, injected]) — o EventCollector espera .key."""
+        self._update_focus_if_needed()
+        ev = _KeyEvent(key)
+        if self._collector._is_hotkey(key):
             hk = self._collector._hotkey.upper()
-            print(f"\n[mrec] >>> GRAVANDO...  (2ª {hk} para PARAR | Ctrl+C cancela)", flush=True)
-        # hotkey parou a gravação?
-        if was and not after:
+            self._collector.on_key_press(ev)
+            if self._collector.is_recording:
+                self._was_started = True
+                print("\n[mrec] >>> GRAVANDO...  (2ª {} para PARAR | Ctrl+C cancela)".format(hk), flush=True)
+            else:
+                print("\n[mrec] <<< PARADO.  Salvando artefatos...", flush=True)
+            return
+        # Não é hotkey -> delega ao collector
+        self._collector.on_key_press(ev)
+        return
+
+    def _on_key_release(self, key, *a):
+        self._collector.on_key_release(_KeyEvent(key))
+        return
+
+    def _on_mouse_move(self, x, y):
+        self._collector.on_mouse_move(_MouseEvent(x, y))
+        return
+
+    def _on_mouse_click(self, x, y, button, pressed):
+        if not pressed:
+            return
+        # normalize o botão pynput (Button.left/right/middle -> "left"...)
+        try:
+            from pynput.mouse import Button
+            for name in ("left", "middle", "right"):
+                if button == getattr(Button, name, None):
+                    button = name
+                    break
+        except Exception:
+            pass
+        self._collector.on_mouse_click(_MouseEvent(x, y, button))
+        return
+
+    def _on_mouse_scroll(self, x, y, dx, dy):
+        self._collector.on_scroll(_MouseEvent(x, y, dx=dx, dy=dy))
+        return
+
+    # ── janela em foco (heurística p/ detectar campo de senha) ─────────
+    def _focused_window_title(self) -> str:
+        """Título da janela em foco (pygetwindow; '' se não suportado)."""
+        try:
+            import pygetwindow as gw
+            ws = gw.getActiveWindow()
+            return ws.title or "" if ws else ""
+        except Exception:
+            return ""
+
+    def _update_focus_if_needed(self, event=None) -> None:
+        """No início da gravação (e a cada clique), atualiza o foco.
+
+        O collector só usa o foco para a heurística de senha — o título real
+        da janela é gravado nos artefatos via meta (não em cada step)."""
+        if not self._capture_focus:
+            return
+        if not self._collector.is_recording:
+            return
+        title = self._focused_window_title()
+        if title:
+            if title != self._collector._focused_window:
+                self._collector.set_focus(title)
+
+    def _hotkey_pressed(self) -> bool:
+        """True se a tecla do hotkey está fisicamente pressionada (Windows / GetAsyncKeyState).
+
+        O listener global do pynput NÃO recebe eventos que vieram via SendInput
+        marcados com KBDLLHOOK_INJECTED (o 1º F9 chega, mas o 2º — disparado
+        pelo GUI/Controller — não). GetAsyncKeyState lê o estado físico e é
+        robusto a isso. Usamos o scan code do hotkey para não depender de layout.
+        """
+        if not sys.platform.startswith("win"):
+            return False
+        try:
+            from pynput.keyboard import KeyCode, Key as _PnKey, _keys
+        except Exception:
+            return False
+
+        # mapeia o hotkey (ex.: "f9") para scan code VK
+        hk = (self._collector._hotkey or "f9").lower()
+        VK = getattr(_PnKey, hk.upper(), None)
+        if VK is None:
+            sc = _keys.keys_to_codes.get(hk[0], None)
+            if not sc:
+                return False
+            vkc = sc[0]
+        else:
+            vkc = VK.value
+        # value do KeyCode de Key.f9 é o enum do VK — convertemos pro VK
+        if hasattr(vkc, "value"):
+            vkc = vkc.value
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.GetAsyncKeyState(vkc) & 0x8000)
+        except Exception:
+            return False
+
+    def _programmatic_toggle(self) -> None:
+        """Aplica o toggle do hotkey sem depender de um evento de teclado real.
+
+        Dispara o MESMO tratamento que o _on_key_press faria para a tecla do
+        hotkey: alterna is_recording via EventCollector.on_key_press e atualiza
+        o _was_started (que controla a saida do loop do run).
+        """
+        hk = (self._collector._hotkey or "f9")
+        before = self._collector.is_recording
+        self._collector.on_key_press(
+            _KeyEvent(type("_ProgKey", (), {
+                "name": hk, "char": None, "value": None,
+            })())
+        )
+        if not before and self._collector.is_recording:
+            self._was_started = True
+            print(f"\n[mrec] >>> GRAVANDO...  (2ª F9 para PARAR | Ctrl+C cancela)", flush=True)
+        elif before and not self._collector.is_recording:
             print(f"\n[mrec] <<< PARADO.  Salvando artefatos...", flush=True)
-
-    def _on_key_release(self, event):
-        self._collector.on_key_release(event)
-
-    def _on_mouse_move(self, event):
-        self._collector.on_mouse_move(event)
-
-    def _on_mouse_click(self, event):
-        self._collector.on_mouse_click(event)
-
-    def _on_mouse_scroll(self, event):
-        self._collector.on_scroll(event)
 
     def run(self, max_seconds: int = 0) -> Recording:
         from pynput import keyboard, mouse
@@ -463,6 +669,7 @@ class Recorder:
 
         hk = (self._collector._hotkey or "f9").upper()
         print(f"[mrec] pressionando {hk} LIGA a gravação; 2ª {hk} PARA.  Ctrl+C cancela.", flush=True)
+        self._running = True
 
         with keyboard.Listener(on_press=self._on_key_press,
                                on_release=self._on_key_release) as kl, \
@@ -472,12 +679,17 @@ class Recorder:
             # loop de controle: sai quando o usuário ligou E parou
             while True:
                 _t.sleep(0.1)
+                # toggle programático (GUI/chama rec.toggle())
+                if self._toggle_event.is_set():
+                    self._toggle_event.clear()
+                    self._programmatic_toggle()
                 if self._was_started and not self._collector.is_recording:
                     break
                 # timeout opcional
                 if max_seconds > 0:
                     # (implementação simplificada: não cobrimos por hora)
                     pass
+        self._running = False
 
         recording = self._collector.to_recording()
         self.recording = recording

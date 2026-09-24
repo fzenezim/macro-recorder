@@ -48,8 +48,13 @@ def to_markdown(recording: Recording, steps: List[Step]) -> str:
     if not steps:
         return "# Passo a passo — sem passos gravados\n"
     name = recording.meta.get("name", "rec")
+    created_at = recording.created_at
+    if isinstance(created_at, str):
+        ca_str = created_at  # já é string ISO (do JSON to_dict)
+    else:
+        ca_str = created_at.isoformat()  # datetime -> ISO string
     out = []
-    out.append(f"# Passo a passo — {recording.created_at.isoformat()} ({name}, {recording.duration_s:.2f}s)")
+    out.append(f"# Passo a passo — {ca_str} ({name}, {recording.duration_s:.2f}s)")
     out.append(f"> _Gerado por `mrec` em {datetime.now().isoformat()}_")
     out.append(_resumo(steps))
     out.append("## Passos")

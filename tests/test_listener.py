@@ -56,9 +56,14 @@ def _key(name):
 
 
 def _collector(tmp_path, **kw):
-    """Cria um EventCollector com um clock sintetico apontando para tmp_path."""
+    """Cria um EventCollector com um clock sintetico apontando para tmp_path.
+
+    Por padrão já nasce GRAVANDO (is_recording=True) — os tests sintéticos
+    injetam eventos sem passar pelo hotkey. O runtime real começa PARADO e
+    liga no primeiro F9 (testado em test_default_is_not_recording)."""
     kw.setdefault("clock", _TestClock())
     kw.setdefault("out_dir", tmp_path)
+    kw.setdefault("is_recording", True)
     return EventCollector(**kw)
 
 
@@ -313,6 +318,15 @@ def test_hotkey_does_not_emit_step(tmp_path):
 # ── flag de gravacao ──────────────────────────────────────────────────
 
 
-def test_default_is_recording(tmp_path):
-    c = _collector(tmp_path)
+def test_default_is_not_recording(tmp_path):
+    """O collector inicia PARADO: o hotkey F9 o liga na 1a tecla.
+
+    (Os tests sintéticos acima setam is_recording=True explicitamente via
+    helper _collector — aqui testamos o comportamento real de produção.)"""
+    c = EventCollector(clock=_TestClock(), out_dir=tmp_path)
+    assert c.is_recording is False
+    # 1o F9 liga, 2o F9 desliga
+    c.on_key_press(FakeKeyPress(key=_key("f9")))
     assert c.is_recording is True
+    c.on_key_press(FakeKeyPress(key=_key("f9")))
+    assert c.is_recording is False
