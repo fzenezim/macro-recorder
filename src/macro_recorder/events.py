@@ -26,6 +26,7 @@ class Action(str, Enum):
     TYPE = "type"
     KEY = "key"
     SCROLL = "scroll"
+    SCREENSHOT = "screenshot"
 
 
 @dataclass
@@ -56,6 +57,11 @@ class Step:
     dx: Optional[int] = None
     dy: Optional[int] = None
 
+    # screenshot
+    screenshot: Optional[str] = None  # caminho relativo do screenshot
+    monitor: Optional[int] = None  # índice do monitor
+    timestamp: Optional[str] = None  # ISO-8601
+
     # ── serialização ───────────────────────────────────────────────────────
     def to_dict(self) -> dict:
         """Seriáliza para dict JSON-able (só campos com valor)."""
@@ -75,6 +81,12 @@ class Step:
         if self.dx is not None or self.dy is not None:
             d["dx"] = self.dx or 0
             d["dy"] = self.dy or 0
+        if self.screenshot is not None:
+            d["screenshot"] = self.screenshot
+        if self.monitor is not None:
+            d["monitor"] = self.monitor
+        if self.timestamp is not None:
+            d["timestamp"] = self.timestamp
         return d
 
     @classmethod
@@ -91,6 +103,9 @@ class Step:
             keys=d.get("keys"),
             dx=d.get("dx"),
             dy=d.get("dy"),
+            screenshot=d.get("screenshot"),
+            monitor=d.get("monitor"),
+            timestamp=d.get("timestamp"),
         )
 
 

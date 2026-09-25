@@ -55,11 +55,17 @@ def main() -> int:
         app.destroy()
         return 1
 
-    # 5) LIGA (1º F9 via toggle programático)
-    print("[e2e] 5) LIGA (toggle 1)", flush=True)
-    rec.toggle()
-    time.sleep(1.0)
-    print(f"[e2e]    is_recording={rec._collector.is_recording}", flush=True)
+    # 5) _toggle_record já chamou rec.toggle() (LIGA)
+    # Espera o estado de gravamento
+    deadline = time.time() + 5
+    while time.time() < deadline and not rec._collector.is_recording:
+        app.update()
+        time.sleep(0.2)
+    print(f"[e2e] 5) is_recording={rec._collector.is_recording}", flush=True)
+    if not rec._collector.is_recording:
+        print("[e2e] ❌ gravação não LIGOU no _toggle_record", flush=True)
+        app.destroy()
+        return 1
 
     # 6) DESLIGA (2º F9 via toggle programático)
     print("[e2e] 6) DESLIGA (toggle 2)", flush=True)

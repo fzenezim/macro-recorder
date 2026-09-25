@@ -114,6 +114,7 @@ class MacroRecorderApp(ctk.CTk):
         self.recordings_dir = Path("recordings")
         self._rec_worker = None
         self._rec = None  # Recorder exposto p/ botão PARAR + WM_DELETE_WINDOW
+        self._screenshots_dir = Path("screenshots")
         # filas thread-safe (worker -> mainloop)
         self._q_log: _queue.Queue = _queue.Queue(maxsize=1000)
         self._q_status: _queue.Queue = _queue.Queue(maxsize=16)
@@ -338,6 +339,9 @@ class MacroRecorderApp(ctk.CTk):
         self.chk_focus.grid(row=0, column=3, padx=(0, 12), sticky="w", pady=4)
         self.chk_focus.select()
 
+        # monitor selector (p/ captura de tela)
+        # (o seletor fica na linha dos botões de captura de tela)
+
         # advanced
         adv = ctk.CTkFrame(settings, fg_color="transparent")
         adv.grid(row=3, column=0, columnspan=3, sticky="ew", padx=8, pady=(4, 12))
@@ -390,6 +394,23 @@ class MacroRecorderApp(ctk.CTk):
         )
         self.btn_cancel.pack(side="left", padx=(8, 0))
 
+        # botões de captura de tela
+        screen_btns = ctk.CTkFrame(main, fg_color="transparent")
+        screen_btns.grid(row=2, column=1, sticky="ew", pady=(0, 10), padx=(12, 0))
+        self.btn_screen = ctk.CTkButton(
+            screen_btns, text="📸 Capturar tela", font=FONT_BODY, height=40,
+            fg_color="#3b82f6", hover_color="#2563eb",
+            command=self._capture_screen,
+        )
+        self.btn_screen.pack(side="left", fill="x", padx=(0, 8))
+        self.opt_monitor = ctk.CTkOptionMenu(
+            screen_btns, values=["monitor 1", "monitor 2", "monitor 3"],
+            width=110, font=FONT_BODY, text_color=TEXT,
+            fg_color=CARD, button_color=CARD_HOVER, dropdown_fg_color=CARD,
+        )
+        self.opt_monitor.set("monitor 1")
+        self.opt_monitor.pack(side="left")
+
         # hint
         ctk.CTkLabel(
             main,
@@ -397,7 +418,7 @@ class MacroRecorderApp(ctk.CTk):
                  "aperte de novo para PARAR. Jogue o mouse no canto "
                  "superior-esquerdo (FailSafe) para abortar à força.",
             font=FONT_SMALL, text_color=TEXT_DIM, justify="left", wraplength=820,
-        ).grid(row=3, column=0, sticky="ew", padx=4, pady=(0, 6))
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 6))
 
         # console
         cons = ctk.CTkFrame(main, fg_color=CONSOLE_BG, corner_radius=10)
@@ -540,16 +561,6 @@ class MacroRecorderApp(ctk.CTk):
         def worker():
             code = 1
             try:
-                rec = Recorder(
-                    out_dir=out_dir,
-                    hotkey=hotkey,
-                    capture_text=cap_text,
-                    capture_clicks=cap_clicks,
-                    capture_scroll=cap_scroll,
-                    capture_focus=cap_focus,
-                    on_state_change=on_state,
-                )
-                self._rec = rec  # exposto p/ botão PARAR + E2E (toggle programático)
                 recording = rec.run()
                 import json
                 (out_dir / "recording.json").write_text(
@@ -579,10 +590,23 @@ class MacroRecorderApp(ctk.CTk):
                 self._emit_log(traceback.format_exc().replace("\n", " | "))
             self._emit_finish("record", code)
 
+        # Cria o Recorder na thread principal (rec.run() roda na worker thread)
+        rec = Recorder(
+            out_dir=out_dir,
+            hotkey=hotkey,
+            capture_text=cap_text,
+            capture_clicks=cap_clicks,
+            capture_scroll=cap_scroll,
+            capture_focus=cap_focus,
+            on_state_change=on_state,
+        )
+        self._rec = rec  # exposto p/ botão PARAR + E2E (toggle programático)
         self._rec_worker = threading.Thread(target=worker, daemon=True)
         self._rec_worker.start()
         self.btn_record.configure(state="disabled")
         self.btn_stop.configure(state="normal")
+        # LIGA a gravação imediatamente (toggle programático = 1º F9)
+        rec.toggle()
 
     def _record_finished(self, code: int):
         self.btn_record.configure(
@@ -612,6 +636,29 @@ class MacroRecorderApp(ctk.CTk):
             "(ou jogue o mouse no canto superior esquerdo p/ abortar)."
         )
 
+    def _capture_screen(self):
+        """Captura a tela do monitor selecionado."""
+        mon_label = self.opt_monitor.get()  # "monitor 1", "monitor 2", "monitor 3"
+        mon_idx = int(mon_label.split()[1]) - 1  # 0-based
+
+        try:
+            from macro_recorder.capture import capture_monitor
+            from datetime import datetime
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_path = Path("screenshots") / f"screen_{ts}_m{mon_idx}.png"
+            capture_monitor(mon_idx, out_path=out_path)
+            self._log(f"[screen] ✅ tela capturada: {out_path}")
+            # se estiver gravando, adiciona ao recording como evento
+            rec = self._rec
+            if rec is not None and rec._running:
+                rec.handle_screenshot(mon_idx)
+                self._log(f"[screen] 📊 screenshot adicionado à gravação")
+        except Exception as e:
+            self._log(f"[screen] ERRO: {repr(e)}")
+            import traceback
+            self._log(traceback.format_exc().replace("\n", " | "))
+
     def _pick_out_dir(self):
         import tkinter.filedialog as fd
         p = fd.askdirectory(title="Pasta de saída das gravações")
@@ -636,10 +683,14 @@ class MacroRecorderApp(ctk.CTk):
             )
             return
 
-        rec_dir = self.recordings_dir / sel
+        out_dir_txt = (self.entry_out.get().strip() or "recordings")
+        rec_root = Path(out_dir_txt)
+        if not rec_root.is_absolute():
+            rec_root = Path.cwd() / rec_root
+        rec_dir = rec_root / sel
         dry = bool(self.chk_dry.get())
-        self._log("─" * 60)
-        self._log(f"[replay] {sel}  dry-run={dry}")
+        self._rlog("─" * 60)
+        self._rlog(f"[replay] {sel}  dry-run={dry}")
         self.btn_replay.configure(text="⏳  Reproduzindo...", state="disabled")
 
         env = os.environ.copy()
@@ -674,7 +725,11 @@ class MacroRecorderApp(ctk.CTk):
         sel = self.combo_rec.get()
         if sel == "(nenhuma gravação)":
             return
-        p = str(self.recordings_dir / sel)
+        out_dir_txt = (self.entry_out.get().strip() or "recordings")
+        rec_root = Path(out_dir_txt)
+        if not rec_root.is_absolute():
+            rec_root = Path.cwd() / rec_root
+        p = str(rec_root / sel)
         if sys.platform == "win32":
             os.startfile(p)  # type: ignore[attr-defined]
         elif sys.platform == "darwin":

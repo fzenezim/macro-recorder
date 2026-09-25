@@ -159,6 +159,8 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
         return f"    _scroll(dx={s.dx}, dy={s.dy}, x={s.x}, y={s.y})"
     if a == Action.MOVE.value:
         return f"    _move(x={s.x}, y={s.y})"
+    if a == Action.SCREENSHOT.value:
+        return "    pass  # screenshot (marcador no replay)"
     return "    pass"
 
 

@@ -21,6 +21,58 @@ CROP_MARGIN = 60  # px ao redor do ponto
 _CONFIDENCE_LADDERS = (0.9, 0.8, 0.7)
 
 
+def get_monitors() -> list:
+    """Retorna lista de monitores (exclui o virtual 'all'.
+
+    Usa mss (rapidinho, sem pyautogui). Retorna lista de dicts com
+    left, top, width, height, is_primary, name.
+    """
+    try:
+        import mss
+    except ImportError:
+        # fallback: só o monitor primário via pyautogui
+        import pyautogui
+        sz = pyautogui.size()
+        return [{"left": 0, "top": 0, "width": sz[0], "height": sz[1],
+                 "is_primary": True, "name": "primary"}]
+    with mss.mss() as sct:
+        # sct.monitors[0] é o virtual box de todos; ignora
+        return [m for m in sct.monitors[1:]]
+
+
+def capture_monitor(monitor_index: int = 0, *, out_path: None = None):
+    """Captura um monitor específico e salva em out_path.
+
+    Retorna (path, timestamp_str).
+    """
+    import datetime
+    import mss
+
+    monitors = get_monitors()
+    if not monitors:
+        raise RuntimeError("nenhum monitor detectado")
+
+    idx = min(monitor_index, len(monitors) - 1)
+    mon = monitors[idx]
+
+    with mss.mss() as sct:
+        mon_data = sct.monitors[1 + idx]  # mss index: 0=virtual, 1=first monitor
+        img = sct.grab(mon_data)
+        from mss.tools import to_png
+        png_bytes = to_png(img.rgb, img.size)
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if out_path is None:
+        raise ValueError("out_path é obrigatório")
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(png_bytes)
+
+    return out_path, ts
+
+
 class AnchorNotFound(Exception):
     """Âncora (crop) não encontrada na tela pelo locateOnScreen.
 

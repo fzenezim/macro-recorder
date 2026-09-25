@@ -655,6 +655,29 @@ class Recorder:
         elif before and not self._collector.is_recording:
             print(f"\n[mrec] <<< PARADO.  Salvando artefatos...", flush=True)
 
+    def handle_screenshot(self, monitor_index: int = 0):
+        """Captura o monitor inteiro em tela cheia (com hora/data do Windows no relógio).
+
+        Salva em assets/ e adiciona evento SCREENSHOT na gravação.
+        Retorna o caminho do arquivo.
+        """
+        import datetime
+        asset_dir = self.out / "assets"
+        asset_dir.mkdir(exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = asset_dir / f"screen_{ts}_m{monitor_index}.png"
+
+        from .capture import capture_monitor
+        capture_monitor(monitor_index, out_path=out_path)
+
+        self.record(
+            EventType.SCREENSHOT,
+            screenshot=f"assets/screen_{ts}_m{monitor_index}.png",
+            monitor=monitor_index,
+            timestamp=datetime.datetime.now().isoformat(),
+        )
+        return out_path
+
     def run(self, max_seconds: int = 0) -> Recording:
         from pynput import keyboard, mouse
         import time as _t
