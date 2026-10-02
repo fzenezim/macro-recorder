@@ -10,7 +10,7 @@ recordings/
 .coverage
 htmlcov/
 # PyInstaller
-*.spec
+macrorecorder.spec
 # Secrets / configs locais
 .env
 *.local

@@ -694,7 +694,11 @@ class MacroRecorderApp(ctk.CTk):
         self.btn_replay.configure(text="⏳  Reproduzindo...", state="disabled")
 
         env = os.environ.copy()
-        args = [sys.executable, "-m", "macro_recorder", "replay", str(rec_dir)]
+        # Usa o interpretador do host (venv em dev; mini-venv embutido no
+        # .exe para funcionar sem Python instalado no sistema).
+        from macro_recorder._host_runtime import runtime_python
+        host_py = runtime_python()
+        args = [str(host_py), "-m", "macro_recorder", "replay", str(rec_dir)]
         if dry:
             args.append("--dry-run")
 
