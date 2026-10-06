@@ -42,6 +42,12 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help="imprime os passos sem agir sobre a tela",
     )
+    rp.add_argument(
+        "--data",
+        metavar="XLSX",
+        default=None,
+        help="Excel de apoio (.xlsx) — 1 linha = 1 execução da macro",
+    )
     return p
 
 
@@ -52,7 +58,7 @@ def main(argv: list | None = None) -> int:
         return run_record()
     if args.cmd == "replay":
         from macro_recorder.replay import run_replay
-        return run_replay(args.folder, dry_run=args.dry_run)
+        return run_replay(args.folder, dry_run=args.dry_run, data_path=args.data)
     return 0
 
 

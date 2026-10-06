@@ -62,6 +62,7 @@ hiddenimports = [
     "macro_recorder.exporter_py",
     "macro_recorder.replay",
     "macro_recorder._host_runtime",
+    "macro_recorder.excel_data",
     "customtkinter",
     "pyautogui",
     "mouseinfo",
@@ -73,6 +74,8 @@ hiddenimports = [
     "mss",
     "mss.windows",
     "ctypes",
+    "openpyxl",
+    "pyperclip",
 ]
 
 # ---------------------------------------------------------------------------

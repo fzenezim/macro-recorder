@@ -27,6 +27,8 @@ RUNTIME_DEPS = [
     "pynput",
     "Pillow",
     "mss",
+    "openpyxl",
+    "pyperclip",
 ]
 
 
@@ -43,11 +45,13 @@ def copy_deps() -> None:
         src_site = Path(sysconfig_paths())  # fallback
     # mapeia pacotes por top-level name
     top_map = {
-        "pyautogui": ["pyautogui"],
+        "pyautogui": ["pyautogui", "pygetwindow", "mouseinfo", "pymsgbox", "PyGetText"],
         "mouseinfo": ["mouseinfo"],
         "pynput": ["pynput"],
         "Pillow": ["PIL", "Pillow"],
         "mss": ["mss"],
+        "openpyxl": ["openpyxl", "et_xmlfile"],
+        "pyperclip": ["pyperclip"],
     }
     needed = set()
     for v in top_map.values():

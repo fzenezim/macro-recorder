@@ -99,12 +99,24 @@ def _key(keys):
     print(f"  key {combo}")
     pyautogui.hotkey(*keys)
 
-def _type(text, interval=0.03):
+def _type(text, interval=0.03, data_row=None):
+    # cola via clipboard (acentos OK + dados nao ficam no .py/arg do subprocess)
+    if data_row is not None and text:
+        import re as _re
+        def _repl(m):
+            v = data_row.get(m.group(1), "")
+            return str(v) if v is not None else ""
+        text = _re.sub(r"\{([A-Za-z0-9_-]+)\}", _repl, text)
     if DRY_RUN:
-        print(f"  [dry] type {text!r}")
+        print(f"  [dry] colar {text!r}")
         return
-    print(f"  type {text!r}")
-    pyautogui.typewrite(text, interval=interval)
+    print(f"  colar {text!r}")
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "v")
+    except Exception:
+        pyautogui.typewrite(text, interval=interval)
 
 def _scroll(dx, dy, x=None, y=None):
     clicks = int(dy / 120)
@@ -154,7 +166,7 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
         return f"    _key({s.keys!r})"
     if a == Action.TYPE.value:
         txt = "***" if s.redacted else (s.text or "")
-        return f"    _type({txt!r}, interval=0.03)"
+        return f"    _type({txt!r}, interval=0.03, data_row=data_row)"
     if a == Action.SCROLL.value:
         return f"    _scroll(dx={s.dx}, dy={s.dy}, x={s.x}, y={s.y})"
     if a == Action.MOVE.value:
@@ -165,12 +177,17 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
 
 
 def to_python(steps: List[Step], dry_run: bool = False) -> str:
-    """Gera o replay.py completo."""
+    """Gera o replay.py completo.
+
+    Quando `data.xlsx` existir na pasta da gravação, o replay itera uma vez
+    por linha e substitui {placeholder} nos passos TYPE pelos valores da
+    coluna correspondente. Sem data.xlsx → 1 execução (comportamento atual).
+    """
     header = _tpl_header(len(steps), sum(s.t for s in steps) if steps else 0.0,
                           _dt.now().isoformat())
     helpers = _tpl_helpers()
     lines = [
-        "def run():",
+        "def run(data_row=None):",
         "    print('replay...')",
         "    pyautogui.FAILSAFE = True",
         "    # mouse top-left aborta (Failsafe)",
@@ -185,9 +202,54 @@ def to_python(steps: List[Step], dry_run: bool = False) -> str:
     lines.append("    print('done.')")
     lines.append("")
     lines.append("")
-    lines.append("if __name__ == '__main__':")
-    lines.append("    run()")
+    # footer: ler data.xlsx (se existir) e iterar por linha
+    lines += _footer_data()
     return header + helpers + "\n".join(lines) + "\n"
+
+
+def _footer_data() -> List[str]:
+    """Gerador do footer __main__: carrega data.xlsx e roda run() 1x/linha."""
+    return [
+        "def _print_sep(i, n):",
+        '    print(f"\\n--- execucao {i}/{n} ---")',
+        "",
+        "def _load_data():",
+        '    """Lê data.xlsx (se existir na pasta) -> list de dicts. None se ausente."""',
+        '    p = Path(__file__).resolve().parent / "data.xlsx"',
+        "    if not p.exists():",
+        "        return None",
+        "    try:",
+        "        from openpyxl import load_workbook",
+        "        wb = load_workbook(p, read_only=True, data_only=True)",
+        "        ws = wb.active",
+        "        rows = list(ws.iter_rows(values_only=True))",
+        "        wb.close()",
+        "        if not rows:",
+        "            return None",
+        "        header = [str(h).strip() if h is not None else f'col{i}' for i, h in enumerate(rows[0])]",
+        "        data = []",
+        "        for row in rows[1:]:",
+        "            d = {header[i]: (str(row[i]) if i < len(row) and row[i] is not None else '') ",
+        "                 for i in range(len(header))}",
+        "            if all(str(v).strip() == '' for v in d.values()):",
+        "                continue",
+        "            data.append(d)",
+        "        return data or None",
+        "    except Exception as e:",
+        '        print(f"  [!] data.xlsx: {e}")',
+        "        return None",
+        "",
+        "if __name__ == '__main__':",
+        "    _data = _load_data()",
+        "    if _data is None:",
+        "        run()",
+        "    else:",
+        "        print(f'  data.xlsx: {len(_data)} linha(s) — 1 execucao por linha')",
+        "        for _i, _row in enumerate(_data, 1):",
+        "            _print_sep(_i, len(_data))",
+        "            run(data_row=_row)",
+        "        print(f'  All done — {len(_data)} execucao(oes).')",
+    ]
 
 
 def export_py(steps: List[Step], out_path: Path | str, dry_run: bool = False) -> Path:

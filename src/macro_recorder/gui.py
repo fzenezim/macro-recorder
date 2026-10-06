@@ -482,6 +482,32 @@ class MacroRecorderApp(ctk.CTk):
         )
         self.chk_pause.select()
         self.chk_pause.grid(row=2, column=0, columnspan=2, padx=12, pady=2, sticky="w")
+        # Excel de apoio
+        self.chk_data = ctk.CTkCheckBox(
+            opts, text="📊 Usar Excel de apoio (1 linha = 1 execução)",
+            font=FONT_BODY, text_color=TEXT,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+        )
+        self.chk_data.grid(row=3, column=0, columnspan=2, padx=12, pady=2, sticky="w")
+        data_row = ctk.CTkFrame(opts, fg_color="transparent")
+        data_row.grid(row=4, column=0, columnspan=2, padx=12, pady=(2, 8), sticky="ew")
+        data_row.grid_columnconfigure(0, weight=1)
+        self.entry_data = ctk.CTkEntry(
+            data_row, font=FONT_BODY, text_color=TEXT,
+            fg_color=CARD, border_color=CARD_HOVER,
+        )
+        self.entry_data.grid(row=0, column=0, sticky="ew", padx=(18, 6))
+        self.entry_data.insert(0, "data.xlsx")
+        ctk.CTkButton(
+            data_row, text="📄 Gerar template", width=150, font=FONT_BODY,
+            fg_color=CARD, hover_color=CARD_HOVER,
+            command=self._generate_template,
+        ).grid(row=0, column=1, padx=(0, 4))
+        ctk.CTkButton(
+            data_row, text="📁...", width=54, font=FONT_BODY,
+            fg_color=CARD, hover_color=CARD_HOVER,
+            command=self._pick_data_xlsx,
+        ).grid(row=0, column=2)
 
         # buttons
         btns = ctk.CTkFrame(main, fg_color="transparent")
@@ -689,18 +715,28 @@ class MacroRecorderApp(ctk.CTk):
             rec_root = Path.cwd() / rec_root
         rec_dir = rec_root / sel
         dry = bool(self.chk_dry.get())
+        use_data = bool(self.chk_data.get())
+        data_txt = (self.entry_data.get().strip() or "data.xlsx")
+        if use_data and not Path(data_txt).exists():
+            from tkinter import messagebox
+            messagebox.showwarning(
+                "Macro Recorder",
+                f"Excel de apoio não encontrado:\n{data_txt}\n\n"
+                "Genere o template (botão 📄) ou aponte para um .xlsx válido.",
+            )
+            return
         self._rlog("─" * 60)
-        self._rlog(f"[replay] {sel}  dry-run={dry}")
+        self._rlog(f"[replay] {sel}  dry-run={dry}  excel={use_data}")
         self.btn_replay.configure(text="⏳  Reproduzindo...", state="disabled")
 
         env = os.environ.copy()
-        # Usa o interpretador do host (venv em dev; mini-venv embutido no
-        # .exe para funcionar sem Python instalado no sistema).
         from macro_recorder._host_runtime import runtime_python
         host_py = runtime_python()
         args = [str(host_py), "-m", "macro_recorder", "replay", str(rec_dir)]
         if dry:
             args.append("--dry-run")
+        if use_data:
+            args += ["--data", data_txt]
 
         def pump():
             code = 1
@@ -720,6 +756,56 @@ class MacroRecorderApp(ctk.CTk):
             self._emit_finish("replay", code)
 
         threading.Thread(target=pump, daemon=True).start()
+
+    def _pick_data_xlsx(self):
+        import tkinter.filedialog as fd
+        p = fd.askopenfilename(
+            title="Selecione o Excel de apoio",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+        )
+        if p:
+            self.entry_data.delete(0, "end")
+            self.entry_data.insert(0, p)
+
+    def _generate_template(self):
+        sel = self.combo_rec.get()
+        if sel == "(nenhuma gravação)":
+            from tkinter import messagebox
+            messagebox.showwarning(
+                "Macro Recorder", "Selecione uma gravação primeiro."
+            )
+            return
+        out_dir_txt = (self.entry_out.get().strip() or "recordings")
+        rec_root = Path(out_dir_txt)
+        if not rec_root.is_absolute():
+            rec_root = Path.cwd() / rec_root
+        rec_dir = rec_root / sel
+        data_txt = (self.entry_data.get().strip() or "data.xlsx")
+        data_path = Path(data_txt)
+        if not data_path.is_absolute():
+            data_path = rec_root / data_path
+
+        try:
+            import json
+            from macro_recorder import excel_data
+            steps = json.loads(
+                (rec_dir / "recording.json").read_text(encoding="utf-8")
+            ).get("steps", [])
+            phs = excel_data.extract_placeholders(steps)
+            if not phs:
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Macro Recorder",
+                    "Nenhum placeholder ({campo}) encontrado nos passos de "
+                    "digitação desta gravação.\n\n"
+                    "Para usar o Excel de apoio, grave o passo de digitação "
+                    "colocando {nome}, {cpf}, etc. no campo.",
+                )
+                return
+            excel_data.make_template(phs, data_path)
+            self._rlog(f"[template] 📄 criado: {data_path}  →  colunas: {phs}")
+        except Exception as e:
+            self._rlog(f"[template] ERRO: {repr(e)}")
 
     def _replay_finished(self, code: int):
         self.btn_replay.configure(text="▶  Reproduzir", state="normal")

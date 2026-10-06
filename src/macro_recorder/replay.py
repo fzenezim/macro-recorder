@@ -3,28 +3,57 @@
 
 Suporta --dry-run (apenas imprime os passos).
 """
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
 
-def _is_dry_run(args: List[str]) -> bool:
-    return "--dry-run" in args
 
-def _extract_dry_run(args: List[str]) -> List[str]:
-    return [a for a in args if a != "--dry-run"]
+def _stage_data(record_dir: Path, data_path: Optional[str], verbose: bool) -> Optional[int]:
+    """Copiam data_path -> record_dir/data.xlsx quando fornecido.
+
+    O replay.py gerado lê sempre 'data.xlsx' ao lado. Se data_path é de fora
+    da pasta, é copiado pra lá (data.xlsx) antes de executar. None = nada.
+    """
+    if not data_path:
+        return None
+    src = Path(data_path).expanduser()
+    if not src.exists():
+        if verbose:
+            print(f"[mrec] ⚠  --data aponta pro arquivo ausente: {src}")
+        return 3
+    dst = record_dir / "data.xlsx"
+    if src.resolve() != dst.resolve():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        if verbose:
+            print(f"[mrec] 📊 data.xlsx de {src.name} -> {dst}")
+    else:
+        if verbose:
+            print(f"[mrec] 📊 data.xlsx = {dst.name}")
+    return None
 
 
 def replay_from_dir(record_dir: Path, dry_run: bool = False,
-                    verbose: bool = True) -> int:
+                    verbose: bool = True,
+                    data_path: Optional[str] = None) -> int:
     """Executa o replay.py gerado em `record_dir`.
-    
-    Retorna 0 no sucesso, 1 no falha, 2 em abortado (failsafe).
+
+    Se ``data.xlsx`` existir na pasta, o replay itera uma vez por linha e
+    substitui {placeholder} nos passos TYPE (1 linha = 1 execução). A flag
+    ``data_path`` copia o xlsx informado pra lá antes de rodar.
+
+    Retorna 0 no sucesso, 1 no falha, 2 em abortado (failsafe), 3 em data ausente.
     """
     record_dir = Path(record_dir)
     if not record_dir.is_dir():
         print(f"[erro] pasta nao existe: {record_dir}")
         return 1
+
+    _err = _stage_data(record_dir, data_path, verbose)
+    if _err is not None:
+        return _err
 
     replay_py = record_dir / "replay.py"
     recording_json = record_dir / "recording.json"
@@ -70,7 +99,7 @@ def replay_from_dir(record_dir: Path, dry_run: bool = False,
     return result.returncode
 
 
-def run_replay(folder: str, dry_run: bool = False) -> int:
+def run_replay(folder: str, dry_run: bool = False,
+               data_path: Optional[str] = None) -> int:
     """Executa o replay da pasta informada."""
-    from pathlib import Path
-    return replay_from_dir(Path(folder), dry_run=dry_run)
+    return replay_from_dir(Path(folder), dry_run=dry_run, data_path=data_path)

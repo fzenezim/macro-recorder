@@ -40,7 +40,7 @@ def test_playback_includes_helpers():
 
 def test_playback_includes_run_function():
     text = pyexp.to_python(_steps())
-    assert "def run():" in text
+    assert "def run(data_row=None):" in text
     assert "if __name__ == " in text
 
 
