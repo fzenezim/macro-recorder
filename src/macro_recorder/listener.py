@@ -612,8 +612,53 @@ class Recorder:
                     break
         except Exception:
             pass
+
+        # filtro: se o clique cai dentro da região da GUI do Macro Recorder,
+        # descarta (evita gravar cliques em "Parar", "Exportar", etc.).
+        if self._is_click_on_gui(x, y):
+            if self._collector.is_recording:
+                print(
+                    f"        [gui] clique ignorado ({x}, {y}) — dentro da janela do app",
+                    flush=True,
+                )
+            return
+
         self._collector.on_mouse_click(_MouseEvent(x, y, button))
         return
+
+    def _is_click_on_gui(self, x: int, y: int) -> bool:
+        """True se (x, y) cai dentro do retângulo da janela ativa (pygetwindow).
+
+        Usado para descarte de cliques feitos na própria GUI do Macro
+        Recorder (botões, menus, campos). Se a janela ativa for a da GUI,
+        qualquer clique dentro do bounding box dela é um clique interno —
+        o usuário clica em "Parar" / "Reproduzir" / digita o hotkey / etc.
+        """
+        # a heurística só faz sentido quando a janela ativa é A GUI do app:
+        # senão poderíamos descartar cliques legítimos em janelas que
+        # coincidem por acidente com um retângulo da GUI.
+        try:
+            import pygetwindow as gw
+            ws = gw.getActiveWindow()
+        except Exception:
+            return False
+        if ws is None:
+            return False
+        title = (getattr(ws, "title", "") or "").strip().lower()
+        # títulos da GUI (gui.py::MacroRecorderApp.title + fallbacks):
+        # "Macro Recorder — gravação & replay por âncora visual"  ou
+        # "Macro Recorder"  /  "MacroRecorder"
+        if not any(t in title for t in (
+            "macro recorder", "macrorecorder", "mrec",
+        )):
+            return False
+        try:
+            l, t, w, h = ws.left, ws.top, ws.width, ws.height
+        except Exception:
+            return False
+        if w <= 0 or h <= 0:
+            return False
+        return (l <= x <= l + w) and (t <= y <= t + h)
 
     def _on_mouse_scroll(self, x, y, dx, dy):
         self._collector.on_scroll(_MouseEvent(x, y, dx=dx, dy=dy))

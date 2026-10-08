@@ -391,3 +391,67 @@ def test_other_keys_still_recorded_after_ignoring_del(tmp_path):
     # texto gravado = 'xy' (sem o DEL no meio)
     all_text = "".join(t.text for t in types)
     assert all_text == "xy"
+
+
+# ── FILTER DE CLIQUES NA GUI ───────────────────────────────────────────────
+
+
+def _mk_recorder(tmp_path, monkeypatch, gui_active=True, gui_rect=(0, 0, 500, 400)):
+    """Cria um Recorder com o _is_click_on_gui mockado.
+
+    Se gui_active=True, qualquer (x, y) dentro de gui_rect é tratado como
+    clique na GUI (descartado) — simula a janela MacroRecorderApp em foco.
+    Se gui_active=False, nenhum clique é descartado.
+    """
+    from macro_recorder.listener import Recorder
+
+    rec = Recorder(out_dir=tmp_path)
+    if gui_active:
+        def fake_gui(x, y):
+            l, t, w, h = gui_rect
+            return (l <= x <= l + w) and (t <= y <= t + h)
+    else:
+        def fake_gui(x, y):
+            return False
+    rec._is_click_on_gui = fake_gui
+    return rec
+
+
+def test_click_inside_gui_is_dropped(tmp_path, monkeypatch):
+    """Clique dentro do bounding box da GUI não vira step (descartado)."""
+    rec = _mk_recorder(tmp_path, monkeypatch, gui_active=True, gui_rect=(100, 100, 400, 300))
+    rec._collector.is_recording = True
+    # clique "dentro da GUI" (150, 150 está dentro do retângulo)
+    rec._on_mouse_click(150, 150, "left", True)
+    # clique "fora da GUI" (600, 600 está fora do retângulo)
+    rec._on_mouse_click(600, 600, "left", True)
+    steps = rec._collector.build(0.0)
+    clicks = [s for s in steps if s.action == Action.CLICK.value]
+    # só o clique de fora deve ter ficado
+    assert len(clicks) == 1
+    assert (clicks[0].x, clicks[0].y) == (600, 600)
+
+
+def test_click_outside_gui_is_recorded(tmp_path, monkeypatch):
+    """Clique fora da GUI (janela ativa = outra app) é gravado normal."""
+    rec = _mk_recorder(tmp_path, monkeypatch, gui_active=False)
+    rec._collector.is_recording = True
+    rec._on_mouse_click(300, 300, "left", True)
+    steps = rec._collector.build(0.0)
+    clicks = [s for s in steps if s.action == Action.CLICK.value]
+    assert len(clicks) == 1
+    assert (clicks[0].x, clicks[0].y) == (300, 300)
+
+
+def test_double_click_inside_gui_is_not_double(tmp_path, monkeypatch):
+    """Dois cliques rápidos dentro da GUI não viram double-click (descartados)."""
+    rec = _mk_recorder(tmp_path, monkeypatch, gui_active=True, gui_rect=(0, 0, 1000, 1000))
+    rec._collector.is_recording = True
+    rec._on_mouse_click(50, 50, "left", True)
+    import time
+    time.sleep(0.1)
+    rec._on_mouse_click(50, 50, "left", True)
+    steps = rec._collector.build(0.0)
+    doubles = [s for s in steps if s.action == Action.DOUBLE_CLICK.value]
+    clicks = [s for s in steps if s.action == Action.CLICK.value]
+    assert doubles == [] and clicks == []
