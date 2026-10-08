@@ -40,6 +40,9 @@ SCROLL_GAP_S = 0.3        # scrolls com < 0.3s entre -> 1 Step.SCROLL
 # modificadores que quebra agrupamento de texto
 MODIFIERS = {"ctrl", "shift", "alt", "win", "cmd"}
 
+# teclas de deleção — NUNCA gravadas (evita apagar dados no replay)
+_DELETE_KEYS = {"delete", "backspace"}
+
 # heuristica de "campo parecendo senha"
 _PASSWORD_HINTS = re.compile(
     r"password|passwd|senha|pwd|secret|login|credencial|"
@@ -204,6 +207,11 @@ class EventCollector:
             return
 
         if not self.is_recording:
+            return
+
+        # teclas de deleção (DEL / Backspace) — NUNCA gravam step
+        # (evita que o replay apague dados acidentalmente no trabalho)
+        if name in _DELETE_KEYS:
             return
 
         # modificador

@@ -330,3 +330,64 @@ def test_default_is_not_recording(tmp_path):
     assert c.is_recording is True
     c.on_key_press(FakeKeyPress(key=_key("f9")))
     assert c.is_recording is False
+
+
+# ── FILTER DE DELEÇÃO (DEL + Backspace) ────────────────────────────────
+
+
+def test_del_key_is_ignored(tmp_path):
+    """Tecla DEL (nome 'delete') não gera nenhum step."""
+    c = _collector(tmp_path)
+    c.on_key_press(FakeKeyPress(key=_key("delete")))
+    c._clock.tick(0.05)
+    c.on_key_release(FakeKeyRelease(key=_key("delete")))
+    steps = c.build(0.0)
+    delete_steps = [s for s in steps if "delete" in (s.keys or [])]
+    assert delete_steps == []
+
+
+def test_backspace_key_is_ignored(tmp_path):
+    """Tecla Backspace não gera nenhum step."""
+    c = _collector(tmp_path)
+    # uma tecla normal antes, pra garantir que o collector tá gravando
+    _char(c, "a")
+    c.on_key_press(FakeKeyPress(key=_key("backspace")))
+    c._clock.tick(0.05)
+    c.on_key_release(FakeKeyRelease(key=_key("backspace")))
+    steps = c.build(0.0)
+    bs_steps = [s for s in steps if "backspace" in (s.keys or [])]
+    assert bs_steps == []
+    # o 'a' antes foi gravado normalmente
+    types = [s for s in steps if s.action == Action.TYPE.value]
+    assert any(t.text == "a" for t in types)
+
+
+def test_ctrl_del_combo_is_ignored(tmp_path):
+    """Atalho Ctrl+DEL (modificadores + tecla de deleção) também é ignorado."""
+    c = _collector(tmp_path)
+    c.on_key_press(FakeKeyPress(key=_key("ctrl")))
+    c._clock.tick(0.02)
+    c.on_key_press(FakeKeyPress(key=_key("delete")))
+    c._clock.tick(0.02)
+    c.on_key_release(FakeKeyRelease(key=_key("delete")))
+    c.on_key_release(FakeKeyRelease(key=_key("ctrl")))
+    steps = c.build(0.0)
+    key_steps = [s for s in steps if s.action == Action.KEY.value]
+    assert key_steps == []
+
+
+def test_other_keys_still_recorded_after_ignoring_del(tmp_path):
+    """Ignorar DEL não afeta o resto das teclas."""
+    c = _collector(tmp_path)
+    _char(c, "x")
+    c.on_key_press(FakeKeyPress(key=_key("delete")))
+    c._clock.tick(0.05)
+    c.on_key_release(FakeKeyRelease(key=_key("delete")))
+    _char(c, "y")
+    steps = c.build(0.0)
+    types = [s for s in steps if s.action == Action.TYPE.value]
+    del_steps = [s for s in steps if "delete" in (s.keys or [])]
+    assert del_steps == []
+    # texto gravado = 'xy' (sem o DEL no meio)
+    all_text = "".join(t.text for t in types)
+    assert all_text == "xy"
