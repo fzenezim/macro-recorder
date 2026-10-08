@@ -44,53 +44,52 @@ def _resumo(steps: List[Step]) -> str:
 
 
 def to_markdown(recording: Recording, steps: List[Step]) -> str:
-    """Gera o texto markdown completo."""
+    """Gera o texto markdown completo (formato IPE — com screenshots a cada clique)."""
     if not steps:
         return "# Passo a passo — sem passos gravados\n"
     name = recording.meta.get("name", "rec")
     created_at = recording.created_at
     if isinstance(created_at, str):
-        ca_str = created_at  # já é string ISO (do JSON to_dict)
+        ca_str = created_at
     else:
-        ca_str = created_at.isoformat()  # datetime -> ISO string
+        ca_str = created_at.isoformat()
     out = []
-    out.append(f"# Passo a passo — {ca_str} ({name}, {recording.duration_s:.2f}s)")
+    out.append(f"# IPE — passo a passo ({name}, {recording.duration_s:.2f}s)")
     out.append(f"> _Gerado por `mrec` em {datetime.now().isoformat()}_")
     out.append(_resumo(steps))
     out.append("## Passos")
     out.append("")
     for n, s in enumerate(steps, 1):
         a = s.action
-        if a == Action.CLICK.value:
-            line = f"({n}) Clique ({s.x}, {s.y})"
+        if a in (Action.CLICK.value, Action.DOUBLE_CLICK.value, Action.RIGHT_CLICK.value):
+            label = {"click": "Clique", "double_click": "Duplo clique", "right_click": "Clique direito"}.get(a, a)
+            out.append(f"### {n}. {label} ({s.x}, {s.y})")
             if s.crop:
-                line += f"\n    ![a{n:02d}](assets/{s.crop})"
-            out.append(line)
-        elif a == Action.DOUBLE_CLICK.value:
-            line = f"({n}) Duplo clique ({s.x}, {s.y})"
-            if s.crop:
-                line += f"\n    ![a{n:02d}](assets/{s.crop})"
-            out.append(line)
-        elif a == Action.RIGHT_CLICK.value:
-            line = f"({n}) Clique direito ({s.x}, {s.y})"
-            if s.crop:
-                line += f"\n    ![a{n:02d}](assets/{s.crop})"
-            out.append(line)
+                out.append(f"![ancora]({s.crop})")
+            # screenshot completo (IPE) — o mais importante para o template
+            if s.screenshot:
+                out.append(f"\n![tela completa]({s.screenshot})")
+            out.append("")
         elif a == Action.KEY.value:
-            # combina modificadores com + e a tecla
             mods, key = s.keys[:-1], s.keys[-1]
             combo = "+".join(mods + [key]) if mods else key
             t_wait = s.t if s.t else 0.0
-            out.append(f"({n}) Atalho: `{combo}` (t+{t_wait:.2f}s)")
+            out.append(f"### {n}. Atalho `{combo}` (t+{t_wait:.2f}s)")
+            out.append("")
         elif a == Action.TYPE.value:
             if s.redacted:
-                out.append(f"({n}) Digitar `***` [_redigido — senha_] (t+{s.t:.2f}s)")
+                out.append(f"### {n}. Digitar `***` [_redigido_] (t+{s.t:.2f}s)")
             else:
-                out.append(f"({n}) Digitar `{s.text}` (t+{s.t:.2f}s)")
+                out.append(f"### {n}. Digitar `{s.text}` (t+{s.t:.2f}s)")
+            if s.screenshot:
+                out.append(f"![tela completa]({s.screenshot})")
+            out.append("")
         elif a == Action.SCROLL.value:
-            out.append(f"({n}) Scroll ({s.dx}, {s.dy}) em t+{s.t:.2f}s")
+            out.append(f"### {n}. Scroll ({s.dx}, {s.dy}) (t+{s.t:.2f}s)")
+            out.append("")
         elif a == Action.MOVE.value:
-            out.append(f"({n}) Mover para ({s.x}, {s.y}) (t+{s.t:.2f}s)")
+            out.append(f"### {n}. Mover para ({s.x}, {s.y}) (t+{s.t:.2f}s)")
+            out.append("")
     out.append("")
     return "\n".join(out)
 

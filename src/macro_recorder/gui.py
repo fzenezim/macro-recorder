@@ -339,6 +339,12 @@ class MacroRecorderApp(ctk.CTk):
         self.chk_focus.grid(row=0, column=3, padx=(0, 12), sticky="w", pady=4)
         self.chk_focus.select()
 
+        self.chk_screen_click = ctk.CTkCheckBox(
+            toggles, text="📸 Tela a cada clique (IPE)", font=FONT_BODY, text_color=TEXT,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+        )
+        self.chk_screen_click.grid(row=1, column=0, padx=(0, 12), sticky="w", pady=4)
+
         # monitor selector (p/ captura de tela)
         # (o seletor fica na linha dos botões de captura de tela)
 
@@ -555,6 +561,7 @@ class MacroRecorderApp(ctk.CTk):
         cap_clicks = bool(self.chk_clicks.get())
         cap_scroll = bool(self.chk_scroll.get())
         cap_focus = bool(self.chk_focus.get())
+        cap_screen = bool(self.chk_screen_click.get())
 
         if not (cap_text or cap_clicks or cap_scroll):
             from tkinter import messagebox
@@ -574,7 +581,7 @@ class MacroRecorderApp(ctk.CTk):
         self._log("─" * 60)
         self._log(
             f"[record] hotkey={hotkey}  out={out_dir}  "
-            f"texto={cap_text} cliques={cap_clicks} scroll={cap_scroll} foco={cap_focus}"
+            f"texto={cap_text} cliques={cap_clicks} scroll={cap_scroll} foco={cap_focus} tela_clic={cap_screen}"
         )
         # ── minimizar a GUI durante a gravação ───────────────────────────
         # A macro manipula o mouse/teclado reais; a janela da GUI fica na
@@ -635,6 +642,7 @@ class MacroRecorderApp(ctk.CTk):
             capture_clicks=cap_clicks,
             capture_scroll=cap_scroll,
             capture_focus=cap_focus,
+            capture_screen_on_click=cap_screen,
             on_state_change=on_state,
         )
         self._rec = rec  # exposto p/ botão PARAR + E2E (toggle programático)

@@ -147,6 +147,7 @@ class EventCollector:
         capture_clicks: bool = True,
         capture_scroll: bool = True,
         capture_focus: bool = True,
+        capture_screen_on_click: bool = False,
         is_recording: bool = False,
         on_state_change=None,
     ):
@@ -165,6 +166,7 @@ class EventCollector:
         # Inicia PARADO por padrão (runtime real: o hotkey F9 o liga na 1a
         # tecla). Tests sintéticos passam is_recording=True explicitamente.
         self.is_recording = bool(is_recording)
+        self.capture_screen_on_click = capture_screen_on_click
 
         # estado interno
         self._events: list = []
@@ -403,6 +405,9 @@ class EventCollector:
         suficientes. Se o menor for uniforme (ex.: fundo branco), usa
         aNNb.png (240x240), depois aNNc.png (360x360). As demais ficam
         na lista step.crops como fallback para o matching.
+
+        Se capture_screen_on_click=True, também grava um screenshot completo
+        (screenNN.png) para o passo-a-passo IPE.
         """
         if step.x is None or step.y is None:
             return
@@ -446,6 +451,33 @@ class EventCollector:
             ]
         except Exception:
             pass
+
+        # ── captura de tela completa (IPE) ─────────────────────────────────
+        if self.capture_screen_on_click:
+            try:
+                import datetime
+                from macro_recorder.capture import capture_monitor
+                nn = f"{self._step_counter:02d}"
+                assets = self._out_dir / "assets"
+                screen_path = assets / f"screen{nn}.png"
+                # monitor 0 por padrão (pode ser configurado pelo caller)
+                capture_monitor(0, out_path=screen_path)
+                # salva o caminho relativo no step
+                relative = str(
+                    screen_path.relative_to(self._out_dir)
+                    if screen_path.is_relative_to(self._out_dir)
+                    else screen_path
+                ).replace("\\", "/")
+                step.screenshot = relative
+                step.timestamp = datetime.datetime.now(
+                    datetime.timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception as e:
+                # não bloqueia se a captura falhar
+                print(
+                    f"        [screen] captura falhou para step {self._step_counter:02d}: {e!r}",
+                    flush=True,
+                )
 
     # ── build ─────────────────────────────────────────────────────────────
     def build(self, stop_time: Optional[float] = None) -> list:
@@ -530,6 +562,7 @@ class Recorder:
         capture_clicks: bool = True,
         capture_scroll: bool = True,
         capture_focus: bool = True,
+        capture_screen_on_click: bool = False,
         on_state_change=None,
     ):
         from pynput import keyboard, mouse  # noqa: F401 — checa disponibilidade
@@ -545,6 +578,7 @@ class Recorder:
             capture_clicks=capture_clicks,
             capture_scroll=capture_scroll,
             capture_focus=capture_focus,
+            capture_screen_on_click=capture_screen_on_click,
             on_state_change=self._on_state_change,
         )
         # começa parado (aguardando 1º F9 para ligar)
