@@ -27,7 +27,12 @@ def _tpl_header(n_steps, duration_s, generated_at):
 def _tpl_helpers():
     return '''
 def _locate(crop, confs=(0.9, 0.8, 0.7)):
-    """Localiza a crop na tela com confidence em cascata."""
+    """Localiza a crop na tela com confidence em cascata.
+
+    Se nenhum nível de confiança achar a âncora, retorna None
+    (NUNCA usa o matching sem confidence — TM_CCOEFF acha qualquer
+    pixel na tela e o clique cai em lugar errado).
+    """
     if DRY_RUN:
         return (None, None)
     p = BASE / "assets" / crop
@@ -37,8 +42,10 @@ def _locate(crop, confs=(0.9, 0.8, 0.7)):
         try:
             box = pyautogui.locateOnScreen(str(p), confidence=c)
         except AssertionError:
-            box = pyautogui.locateOnScreen(str(p))
-            break
+            # locateOnScreen com confidence pode levantar em
+            # edge cases (imagem grande, etc) — ignora e tenta o
+            # próximo nível (nunca cai no matching sem confidence).
+            continue
         if box is not None:
             return pyautogui.center(box)
     return None

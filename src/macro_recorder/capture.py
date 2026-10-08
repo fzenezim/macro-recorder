@@ -216,6 +216,9 @@ def find_anchor(
         raise FileNotFoundError(f"crop não existe: {crop}")
 
     # tenta com confidences da ladder
+    # SE opencv não está disponível, cai para match exato (confidence=None).
+    # Se opencv está disponível mas nada acerta, NUNCA cai para sem
+    # confidence (TM_CCOEFF acha qualquer pixel — perigoso).
     opencv_unavailable = False
     for conf in ladder:
         try:
@@ -229,22 +232,23 @@ def find_anchor(
         if loc is not None:
             return _center(loc)
 
-    # fallback para match exato (confidence=None explicitamente)
-    try:
-        loc = pyautogui.locateOnScreen(str(crop), confidence=None)
-    except Exception:
-        loc = None
-    if loc is not None:
-        return _center(loc)
+    # se opencv não está disponível, tenta match exato (confidence=None)
+    if opencv_unavailable:
+        try:
+            loc = pyautogui.locateOnScreen(str(crop), confidence=None)
+        except Exception:
+            loc = None
+        if loc is not None:
+            return _center(loc)
+        # última tentativa sem kwarg (comportamento default)
+        try:
+            loc = pyautogui.locateOnScreen(str(crop))
+        except Exception:
+            loc = None
+        if loc is not None:
+            return _center(loc)
 
-    # última tentativa: sem o kwarg (comportamento default do pyautogui)
-    try:
-        loc = pyautogui.locateOnScreen(str(crop))
-    except Exception:
-        loc = None
-    if loc is not None:
-        return _center(loc)
-
+    # opencv disponível, nada achou na ladder → NUNCA clica em ponto cego
     raise AnchorNotFound(step_no, crop)
 
 
