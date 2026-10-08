@@ -798,9 +798,11 @@ class MacroRecorderApp(ctk.CTk):
         try:
             import json
             from macro_recorder import excel_data
-            steps = json.loads(
+            from macro_recorder.events import Step
+            data = json.loads(
                 (rec_dir / "recording.json").read_text(encoding="utf-8")
-            ).get("steps", [])
+            )
+            steps = [Step.from_dict(d) for d in data.get("steps", [])]
             phs = excel_data.extract_placeholders(steps)
             if not phs:
                 from tkinter import messagebox
@@ -812,7 +814,7 @@ class MacroRecorderApp(ctk.CTk):
                     "colocando {nome}, {cpf}, etc. no campo.",
                 )
                 return
-            excel_data.make_template(phs, data_path)
+            excel_data.make_template(steps, data_path)
             self._rlog(f"[template] 📄 criado: {data_path}  →  colunas: {phs}")
         except Exception as e:
             self._rlog(f"[template] ERRO: {repr(e)}")
