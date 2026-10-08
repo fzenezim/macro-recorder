@@ -133,33 +133,48 @@ def _clamp_box(
 # ───────────────────────────────────────────────────────────────────────────
 # crop
 # ───────────────────────────────────────────────────────────────────────────
-def make_crop(
+def _count_unique_colors(img) -> int:
+    """Retorna o número de cores únicas na imagem (quantizada em 16 níveis)."""
+    try:
+        # quantiza para 16 níveis por canal (256^3 -> 16^3 = 4096 possíveis)
+        quantized = img.quantize(colors=256, method=0)
+        return len(set(list(quantized.getdata())))
+    except Exception:
+        # fallback: contagem direta
+        return len(set(img.getdata()))
+
+
+CROP_MIN_UNIQUE = 40       # mínimo de cores únicas para âncora ser "suficiente"
+CROP_MAX_MARGIN = 180      # margem máxima (360x360px total)
+_CROP_MAX_ATTEMPTS = 3     # tentativas: 60px, 120px, 180px
+
+
+def make_cascading_crops(
     x: int,
     y: int,
     *,
+    out_path: Path | str,
     screen_size: Optional[Tuple[int, int]] = None,
     virtual_size: Optional[Tuple[int, int]] = None,
     virtual_origin: Optional[Tuple[int, int]] = None,
-    margin: int = CROP_MARGIN,
-    out_path: Path | str,
-) -> Tuple[Tuple[int, int, int, int], Path]:
-    """Recorta a tela ao redor de (x, y) e salva em <out_path>.
+    base_margin: int = CROP_MARGIN,
+    max_margin: int = CROP_MAX_MARGIN,
+    min_unique: int = CROP_MIN_UNIQUE,
+) -> Tuple[Tuple[int, int, int, int], Path, list]:
+    """Cria crops em cascata de tamanho crescente ao redor de (x, y).
 
-    Argumentos:
-        x, y: coordenadas virtuais (podem ser negativas — multimonitor)
-        screen_size: (w, h) da tela principal (para clamp quando é a única
-            tela). Se virtual_size for dado, usa-se este.
-        virtual_size: (w, h) da área virtual total (multimonitor).
-        virtual_origin: (x, y) da origem da área virtual — default (0, 0)
-        margin: largura da margem ao redor do ponto (default 60)
-        out_path: onde salvar o PNG
+    Começa com base_margin (60px -> 120x120). Se a imagem tiver menos que
+    `min_unique` cores únicas (uniforme demais, ex.: fundo branco), tenta
+    com o dobro da margem (120px -> 240x240), depois 3x (180px -> 360x360).
 
-    Retorna (region_box, path):
-        region_box = (left, top, width, height) — o que screenshot(region=)
-            recebeu.
+    Para cada tentativa, salva em out_path, _b, _c (etc). Retorna:
+        (region_box, chosen_path, [all_saved_paths])
+
+    O listener deve usar `chosen_path` como o crop principal (a maior que
+    ainda tem cores únicas suficientes) e todas as demais como fallback.
     """
     import pyautogui
-    from PIL import Image  # import aqui para não quebrar se PIL não estiver
+    from PIL import Image
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -172,11 +187,83 @@ def make_crop(
         v_origin = (0, 0)
         v_size = screen_size
     else:
-        # fallback: descobre via pyautogui
         full = pyautogui.screenshot()
         v_origin = (0, 0)
         v_size = (full.size[0], full.size[1]) if hasattr(full, "size") else (1920, 1080)
-        full.close() if hasattr(full, "close") else None  # type: ignore
+        if hasattr(full, "close"):
+            full.close()
+
+    saved: list = []
+    base_stem = out_path.stem
+    base_dir = out_path.parent
+    base_suffix = out_path.suffix or ".png"
+
+    for i in range(_CROP_MAX_ATTEMPTS):
+        margin = base_margin * (i + 1)
+        if margin > max_margin:
+            break
+        L = x - margin
+        T = y - margin
+        R = x + margin
+        B = y + margin
+        L, T, R, B = _clamp_box(L, T, R, B, virtual_origin=v_origin, virtual_size=v_size)
+        region = (L, T, R - L, B - T)
+
+        suffix = "" if i == 0 else f"{chr(ord('a') + i)}"
+        out = base_dir / f"{base_stem}{suffix}{base_suffix}"
+        img = pyautogui.screenshot(region=region)
+        img.save(str(out))
+        if hasattr(img, "close"):
+            img.close()
+        saved.append(out)
+
+        # checa se já tem cores suficientes
+        from PIL import Image as _I
+        test_img = _I.open(out)
+        unique = _count_unique_colors(test_img)
+        if hasattr(test_img, "close"):
+            test_img.close()
+
+        if unique >= min_unique:
+            return region, out, saved
+
+    # se nada teve cores suficientes, usa a maior (última salva)
+    return region, saved[-1] if saved else out, saved
+
+
+def make_crop(
+    x: int,
+    y: int,
+    *,
+    screen_size: Optional[Tuple[int, int]] = None,
+    virtual_size: Optional[Tuple[int, int]] = None,
+    virtual_origin: Optional[Tuple[int, int]] = None,
+    margin: int = CROP_MARGIN,
+    out_path: Path | str,
+) -> Tuple[Tuple[int, int, int, int], Path]:
+    """Recorta a tela ao redor de (x, y) e salva em <out_path> (SINGLE, sem
+    cascata). Mantida para compatibilidade com código legado e os testes.
+
+    Para âncoras adaptativas (cascata 120/240/360), use `make_cascading_crops`.
+    """
+    import pyautogui
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # resolve a área de referência para o clamp
+    if virtual_size and virtual_size[0] > 0 and virtual_size[1] > 0:
+        v_origin = virtual_origin or (0, 0)
+        v_size = virtual_size
+    elif screen_size:
+        v_origin = (0, 0)
+        v_size = screen_size
+    else:
+        full = pyautogui.screenshot()
+        v_origin = (0, 0)
+        v_size = (full.size[0], full.size[1]) if hasattr(full, "size") else (1920, 1080)
+        if hasattr(full, "close"):
+            full.close()
 
     L = x - margin
     T = y - margin
@@ -186,7 +273,6 @@ def make_crop(
 
     region = (L, T, R - L, B - T)
     img = pyautogui.screenshot(region=region)
-    # salva (mesmo no mock, que implementa .save)
     img.save(str(out_path))
     if hasattr(img, "close"):
         img.close()

@@ -62,6 +62,9 @@ class Step:
     monitor: Optional[int] = None  # índice do monitor
     timestamp: Optional[str] = None  # ISO-8601
 
+    # crops em cascata (fallbacks maiores, ex.: [a01.png, a01b.png, a01c.png])
+    crops: Optional[list] = None  # caminhos relativos dos fallbacks
+
     # ── serialização ───────────────────────────────────────────────────────
     def to_dict(self) -> dict:
         """Seriáliza para dict JSON-able (só campos com valor)."""
@@ -87,6 +90,8 @@ class Step:
             d["monitor"] = self.monitor
         if self.timestamp is not None:
             d["timestamp"] = self.timestamp
+        if self.crops is not None:
+            d["crops"] = list(self.crops)
         return d
 
     @classmethod
@@ -106,6 +111,7 @@ class Step:
             screenshot=d.get("screenshot"),
             monitor=d.get("monitor"),
             timestamp=d.get("timestamp"),
+            crops=d.get("crops"),
         )
 
 

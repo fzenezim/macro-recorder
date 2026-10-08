@@ -397,19 +397,53 @@ class EventCollector:
 
     # ── crop (lazy import para não quebrar nos tests) ──────────────────────
     def _maybe_capture(self, step: Step) -> None:
-        """Se o step tem x/y, grava o crop em assets/aNN.png."""
+        """Se o step tem x/y, grava crops em cascata (120/240/360) em assets/aNN.png.
+
+        O crop principal (aNN.png) é o menor que tiver cores únicas
+        suficientes. Se o menor for uniforme (ex.: fundo branco), usa
+        aNNb.png (240x240), depois aNNc.png (360x360). As demais ficam
+        na lista step.crops como fallback para o matching.
+        """
         if step.x is None or step.y is None:
             return
         try:
-            from macro_recorder.capture import make_crop
+            from macro_recorder.capture import make_cascading_crops
         except Exception:
+            # fallback: make_crop simples (caso a cascata não esteja disponível)
+            try:
+                from macro_recorder.capture import make_crop
+            except Exception:
+                return
+            try:
+                nn = f"{self._step_counter:02d}"
+                assets = self._out_dir / "assets"
+                out = assets / f"a{nn}.png"
+                make_crop(step.x, step.y, out_path=out)
+                step.crop = f"assets/a{nn}.png"
+            except Exception:
+                pass
             return
+
         try:
             nn = f"{self._step_counter:02d}"
             assets = self._out_dir / "assets"
             out = assets / f"a{nn}.png"
-            make_crop(step.x, step.y, out_path=out)
-            step.crop = f"assets/a{nn}.png"
+            _, chosen, saved = make_cascading_crops(step.x, step.y, out_path=out)
+            # salva relativo ao out_dir (replay.py usa BASE/assets/...)
+            step.crop = str(
+                chosen.relative_to(self._out_dir)
+                if chosen.is_relative_to(self._out_dir)
+                else chosen
+            ).replace("\\", "/")
+            # salvos adicionais como fallback
+            step.crops = [
+                str(
+                    s.relative_to(self._out_dir)
+                    if s.is_relative_to(self._out_dir)
+                    else s
+                ).replace("\\", "/")
+                for s in saved
+            ]
         except Exception:
             pass
 

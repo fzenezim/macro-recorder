@@ -50,11 +50,15 @@ def _locate(crop, confs=(0.9, 0.8, 0.7)):
             return pyautogui.center(box)
     return None
 
-def _click(crop=None, x=None, y=None):
-    if x is None and crop is not None:
-        pt = _locate(crop)
-        if pt:
-            x, y = pt
+def _click(crop=None, crops=None, x=None, y=None):
+    """Clica. Se `crops` (lista), tenta cada uma em cascata até localizar."""
+    if x is None:
+        for c in ([crop] if crop else []) + (crops or []):
+            if c:
+                pt = _locate(c)
+                if pt:
+                    x, y = pt
+                    break
     if x is None and not DRY_RUN:
         print("  [!] nao-localizei")
         return
@@ -66,11 +70,14 @@ def _click(crop=None, x=None, y=None):
     print(f"  click ({x}, {y})")
     pyautogui.click(x, y)
 
-def _double_click(crop=None, x=None, y=None):
-    if x is None and crop is not None:
-        pt = _locate(crop)
-        if pt:
-            x, y = pt
+def _double_click(crop=None, crops=None, x=None, y=None):
+    if x is None:
+        for c in ([crop] if crop else []) + (crops or []):
+            if c:
+                pt = _locate(c)
+                if pt:
+                    x, y = pt
+                    break
     if x is None and not DRY_RUN:
         print("  [!] nao-localizei")
         return
@@ -82,11 +89,14 @@ def _double_click(crop=None, x=None, y=None):
     print(f"  double-click ({x}, {y})")
     pyautogui.doubleClick(x, y)
 
-def _right_click(crop=None, x=None, y=None):
-    if x is None and crop is not None:
-        pt = _locate(crop)
-        if pt:
-            x, y = pt
+def _right_click(crop=None, crops=None, x=None, y=None):
+    if x is None:
+        for c in ([crop] if crop else []) + (crops or []):
+            if c:
+                pt = _locate(c)
+                if pt:
+                    x, y = pt
+                    break
     if x is None and not DRY_RUN:
         print("  [!] nao-localizei")
         return
@@ -159,15 +169,18 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
         prefix = "print('[dry] "
     if a == Action.CLICK.value:
         if s.crop:
-            return f"    _click(crop={s.crop!r}, x={s.x}, y={s.y})"
+            crops_arg = f", crops={s.crops!r}" if s.crops else ""
+            return f"    _click(crop={s.crop!r}{crops_arg}, x={s.x}, y={s.y})"
         return f"    _click(x={s.x}, y={s.y})"
     if a == Action.DOUBLE_CLICK.value:
         if s.crop:
-            return f"    _double_click(crop={s.crop!r}, x={s.x}, y={s.y})"
+            crops_arg = f", crops={s.crops!r}" if s.crops else ""
+            return f"    _double_click(crop={s.crop!r}{crops_arg}, x={s.x}, y={s.y})"
         return f"    _double_click(x={s.x}, y={s.y})"
     if a == Action.RIGHT_CLICK.value:
         if s.crop:
-            return f"    _right_click(crop={s.crop!r}, x={s.x}, y={s.y})"
+            crops_arg = f", crops={s.crops!r}" if s.crops else ""
+            return f"    _right_click(crop={s.crop!r}{crops_arg}, x={s.x}, y={s.y})"
         return f"    _right_click(x={s.x}, y={s.y})"
     if a == Action.KEY.value:
         return f"    _key({s.keys!r})"
