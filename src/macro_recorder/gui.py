@@ -741,9 +741,19 @@ class MacroRecorderApp(ctk.CTk):
         def pump():
             code = 1
             try:
+                # Windows: esconde a janela do CMD que o python.exe abriria
+                # (o console interno da GUI já mostra tudo em tempo real).
+                # Sem NO_WINDOW, o python.exe console build abre um prompt
+                # que fica na frente enquanto a macro roda.
+                kw = {}
+                if sys.platform == "win32":
+                    CREATE_NO_WINDOW = 0x08000000
+                    kw["creationflags"] = CREATE_NO_WINDOW
                 p = subprocess.Popen(
                     args, env=env, stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT, cwd=str(self.project_root), text=True,
+                    stderr=subprocess.STDOUT, cwd=str(self.project_root),
+                    text=True,
+                    **kw,
                 )
                 for line in p.stdout:
                     line = line.rstrip("\n")
