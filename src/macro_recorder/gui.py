@@ -729,6 +729,21 @@ class MacroRecorderApp(ctk.CTk):
         self._rlog(f"[replay] {sel}  dry-run={dry}  excel={use_data}")
         self.btn_replay.configure(text="⏳  Reproduzindo...", state="disabled")
 
+        # ── minimizar a GUI antes de reproduzir ─────────────────────────
+        # A macro manipula o mouse/teclado reais; a janela da GUI fica na
+        # frente e atrapalha os âncoras. Minimizamos agora e restauramos
+        # em _replay_finished.
+        self._minimized_for_replay = False
+        if not dry:
+            try:
+                self.state("withdrawn")  # some da tela (equivalente minimize)
+                self._minimized_for_replay = True
+                self._rlog("[replay] GUI minimizada durante a reprodução")
+            except Exception:
+                self._rlog("[replay] ⚠ não consegui minimizar a GUI")
+        else:
+            self._rlog("[replay] dry-run: GUI permanece visível")
+
         env = os.environ.copy()
         from macro_recorder._host_runtime import runtime_python
         host_py = runtime_python()
@@ -820,6 +835,15 @@ class MacroRecorderApp(ctk.CTk):
             self._rlog(f"[template] ERRO: {repr(e)}")
 
     def _replay_finished(self, code: int):
+        # restaura a GUI (se foi minimizada para o replay)
+        if getattr(self, "_minimized_for_replay", False):
+            try:
+                self.state("normal")
+                self.deiconify()
+                self._rlog("[replay] GUI restaurada")
+            except Exception:
+                pass
+            self._minimized_for_replay = False
         self.btn_replay.configure(text="▶  Reproduzir", state="normal")
         self._rlog(f"[replay] finalizado (code={code}).")
 

@@ -117,7 +117,12 @@ def _key(keys):
     pyautogui.hotkey(*keys)
 
 def _type(text, interval=0.03, data_row=None):
-    # cola via clipboard (acentos OK + dados nao ficam no .py/arg do subprocess)
+    """Digite `text`. Sempre via clipboard (acentos, emojis, etc.).
+
+    Typewrite só suporta ASCII (128 chars do layout US) — o 'á' vira
+    a + ' (apostrofe) porque o character mapping do US layout não tem
+    acentos. Clipboard + Ctrl+V é o único caminho confiável.
+    """
     if data_row is not None and text:
         import re as _re
         def _repl(m):
@@ -132,7 +137,10 @@ def _type(text, interval=0.03, data_row=None):
         import pyperclip
         pyperclip.copy(text)
         pyautogui.hotkey("ctrl", "v")
-    except Exception:
+    except Exception as e:
+        # clipboard não disponível: tenta typewrite (SO ASCII)
+        # e avisa — se o texto tiver acentos, vai sair errado.
+        print(f"  [!] clipboard falhou ({e}) — caindo em typewrite (ASCII só)" )
         pyautogui.typewrite(text, interval=interval)
 
 def _scroll(dx, dy, x=None, y=None):
