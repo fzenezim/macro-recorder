@@ -576,7 +576,18 @@ class MacroRecorderApp(ctk.CTk):
             f"[record] hotkey={hotkey}  out={out_dir}  "
             f"texto={cap_text} cliques={cap_clicks} scroll={cap_scroll} foco={cap_focus}"
         )
-        self._emit_status("waiting")
+        # ── minimizar a GUI durante a gravação ───────────────────────────
+        # A macro manipula o mouse/teclado reais; a janela da GUI fica na
+        # frente e atrapalha (vira âncora no matching). Minimizamos agora
+        # e restauramos em _record_finished.
+        self._minimized_for_record = False
+        try:
+            self.state("withdrawn")
+            self._minimized_for_record = True
+            self._emit_log("[record] GUI minimizada durante a gravação")
+        except Exception:
+            self._emit_log("[record] ⚠ não consegui minimizar a GUI")
+        self._emit_status("recording")
 
         def on_state(is_rec):
             # callback thread-safe do collector -> fila -> mainloop
@@ -635,6 +646,15 @@ class MacroRecorderApp(ctk.CTk):
         rec.toggle()
 
     def _record_finished(self, code: int):
+        # restaura a GUI (se foi minimizada para a gravação)
+        if getattr(self, "_minimized_for_record", False):
+            try:
+                self.state("normal")
+                self.deiconify()
+                self._log("[record] GUI restaurada")
+            except Exception:
+                pass
+            self._minimized_for_record = False
         self.btn_record.configure(
             text="⏺  Começar a gravar", fg_color=DANGER, hover_color=DANGER_HOVER,
             state="normal",
@@ -868,6 +888,7 @@ class MacroRecorderApp(ctk.CTk):
         self.status_lbl.configure(text=text)
         if state == "recording":
             self._blink_phase = 0
+            self._blink_active = True
             self._blink_tick()
         else:
             colors = {
@@ -877,8 +898,12 @@ class MacroRecorderApp(ctk.CTk):
                 "done": SUCCESS,
             }
             self.status_lbl.configure(text_color=colors.get(state, TEXT))
+            # para o blink se estiver ativo
+            self._blink_active = False
 
     def _blink_tick(self):
+        if not getattr(self, "_blink_active", False):
+            return
         self._blink_phase = (self._blink_phase + 1) % 2
         if self._blink_phase == 0:
             self.status_lbl.configure(text="●  GRAVANDO...", text_color=DANGER)
