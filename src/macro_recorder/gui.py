@@ -253,6 +253,8 @@ class MacroRecorderApp(ctk.CTk):
         main = ctk.CTkFrame(parent, fg_color="transparent")
         main.grid(sticky="nsew", padx=8, pady=8)
         main.grid_columnconfigure(0, weight=1)
+        # row 3 (hint) não expande; row 4 (console sim, com o weight)
+        main.grid_rowconfigure(3, weight=0)
         main.grid_rowconfigure(4, weight=1)
 
         # status
@@ -397,16 +399,19 @@ class MacroRecorderApp(ctk.CTk):
         )
         self.btn_cancel.pack(side="left", padx=(8, 0))
 
-        # hint
+        # hint — linha do grid PRÓPRIA (row=3) para não confluir com os
+        # botões de rec_btns (row=2); width controlada com wraplength ~
+        # à largura útil da janela (evita transbordo lateral por cima dos botões).
         ctk.CTkLabel(
             main,
             text="Ao gravar: aperte o hotkey (F9) para LIGAR, faça a tarefa, "
                  "aperte de novo para PARAR. Jogue o mouse no canto "
-                 "superior-esquerdo (FailSafe) para abortar à força.\n"
+                 "superior-esquerdo (FailSafe) para abortar à força. "
                  "Marque '📸 Tela a cada clique' para gerar screenshots "
-                 "automáticos (formato IPE) em cada mouse click.",
-            font=FONT_SMALL, text_color=TEXT_DIM, justify="left", wraplength=820,
-        ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 6))
+                 "automáticos (formato IPE) em cada clique de mouse.",
+            font=FONT_SMALL, text_color=TEXT_DIM, justify="left",
+            wraplength=740,
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 8))
 
         # console
         cons = ctk.CTkFrame(main, fg_color=CONSOLE_BG, corner_radius=10)
