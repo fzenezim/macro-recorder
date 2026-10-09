@@ -456,19 +456,24 @@ class EventCollector:
         if self.capture_screen_on_click:
             try:
                 import datetime
-                from macro_recorder.capture import capture_monitor
+                from macro_recorder.capture import (
+                    capture_monitor,
+                    monitor_for_point,
+                )
                 nn = f"{self._step_counter:02d}"
                 assets = self._out_dir / "assets"
                 screen_path = assets / f"screen{nn}.png"
-                # monitor 0 por padrão (pode ser configurado pelo caller)
-                capture_monitor(0, out_path=screen_path)
-                # salva o caminho relativo no step
+                # monitor dinâmico: o que contém o ponto do clique
+                mon_idx = monitor_for_point(step.x, step.y)
+                capture_monitor(mon_idx, out_path=screen_path)
+                # salva o caminho relativo + número do monitor no step
                 relative = str(
                     screen_path.relative_to(self._out_dir)
                     if screen_path.is_relative_to(self._out_dir)
                     else screen_path
                 ).replace("\\", "/")
                 step.screenshot = relative
+                step.monitor = mon_idx
                 step.timestamp = datetime.datetime.now(
                     datetime.timezone.utc
                 ).strftime("%Y-%m-%dT%H:%M:%SZ")

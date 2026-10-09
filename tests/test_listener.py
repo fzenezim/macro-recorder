@@ -483,3 +483,80 @@ def test_screen_capture_on_click_enabled(tmp_path):
     # note: em ambiente sem display, capture_monitor falha → screenshot fica None
     # mas O CÓDIGO TENTOU (não quebrou)
     assert clicks[0].screenshot is None or isinstance(clicks[0].screenshot, str)
+
+
+# ── MONITOR DINÂMICO (seleção por coordenada do clique) ──────────────────
+
+
+def test_monitor_for_point_secondary(tmp_path, monkeypatch):
+    """Ponto dentro do 2º monitor → devolve índice 1."""
+    import macro_recorder.capture as cap
+    monkeypatch.setattr(
+        cap, "get_monitors",
+        lambda: [
+            {"left": 0, "top": 0, "width": 1920, "height": 1080, "is_primary": True, "name": "m1"},
+            {"left": 1920, "top": 0, "width": 1920, "height": 1080, "is_primary": False, "name": "m2"},
+        ],
+    )
+    assert cap.monitor_for_point(100, 100) == 0
+    assert cap.monitor_for_point(2000, 100) == 1
+
+
+def test_monitor_for_point_left_negative(tmp_path, monkeypatch):
+    """Monitor à esquerda do primário (left negativo) → índice 1."""
+    import macro_recorder.capture as cap
+    monkeypatch.setattr(
+        cap, "get_monitors",
+        lambda: [
+            {"left": 0, "top": 0, "width": 1920, "height": 1080, "is_primary": True, "name": "m1"},
+            {"left": -1920, "top": 0, "width": 1920, "height": 1080, "is_primary": False, "name": "m2"},
+        ],
+    )
+    # ponto no monitor à esquerda tem x negativo
+    assert cap.monitor_for_point(-500, 100) == 1
+    assert cap.monitor_for_point(500, 100) == 0
+
+
+def test_monitor_for_point_fallback_primary(tmp_path, monkeypatch):
+    """Ponto fora de qualquer monitor → fallback para o primário (0)."""
+    import macro_recorder.capture as cap
+    monkeypatch.setattr(
+        cap, "get_monitors",
+        lambda: [
+            {"left": 0, "top": 0, "width": 1920, "height": 1080, "is_primary": True, "name": "m1"},
+        ],
+    )
+    assert cap.monitor_for_point(99999, 99999) == 0
+
+
+def test_capture_screen_uses_click_monitor(tmp_path, monkeypatch):
+    """A captura usa O monitor que contém o clique (dinâmico)."""
+    import macro_recorder.capture as cap
+    monkeypatch.setattr(
+        cap, "get_monitors",
+        lambda: [
+            {"left": 0, "top": 0, "width": 1920, "height": 1080, "is_primary": True, "name": "m1"},
+            {"left": 1920, "top": 0, "width": 1920, "height": 1080, "is_primary": False, "name": "m2"},
+        ],
+    )
+    called = {}
+
+    def fake_capture_mon(idx, *, out_path=None):
+        called["idx"] = idx
+        p = Path(out_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return p, "ts"
+
+    monkeypatch.setattr(cap, "capture_monitor", fake_capture_mon)
+
+    c = _collector(tmp_path, capture_screen_on_click=True)
+    c.on_mouse_move(FakeMouseEvent(x=2000, y=100))  # dentro do monitor 2
+    _click(c, 2000, 100, "left")
+    steps = c.build(0.0)
+    clicks = [s for s in steps if s.action == Action.CLICK.value]
+    assert len(clicks) == 1
+    # a captura deveria ter usado o monitor 1 (índice do 2º)
+    assert called.get("idx") == 1
+    assert clicks[0].screenshot is not None
+    assert clicks[0].monitor == 1

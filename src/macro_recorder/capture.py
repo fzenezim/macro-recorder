@@ -40,6 +40,25 @@ def get_monitors() -> list:
         return [m for m in sct.monitors[1:]]
 
 
+def monitor_for_point(x: int, y: int) -> int:
+    """Retorna o índice (0-based) do monitor que contém o ponto (x, y).
+
+    O (x, y) está em coord. virtuais multimonitor (podem ser negativos
+    p/ monitores à esquerda do primário). Se nenhum monitor contém o
+    ponto (ex. ponto fora da área), retorna o primário (0).
+    """
+    monitors = get_monitors()
+    if not monitors:
+        return 0
+    # tenta achar um monitor cujo retângulo contenha o ponto
+    for i, m in enumerate(monitors):
+        if m["left"] <= x < m["left"] + m["width"] and \
+           m["top"] <= y < m["top"] + m["height"]:
+            return i
+    # fallback: monitor primário (index 0)
+    return 0
+
+
 def capture_monitor(monitor_index: int = 0, *, out_path: None = None):
     """Captura um monitor específico e salva em out_path.
 

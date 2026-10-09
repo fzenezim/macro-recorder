@@ -61,9 +61,11 @@ def to_markdown(recording: Recording, steps: List[Step]) -> str:
     out.append("")
     for n, s in enumerate(steps, 1):
         a = s.action
+        # sufixo "mN" quando o passo grava o monitor (IPE dinâmica)
+        mtag = f" [monitor {s.monitor}]" if s.monitor else ""
         if a in (Action.CLICK.value, Action.DOUBLE_CLICK.value, Action.RIGHT_CLICK.value):
             label = {"click": "Clique", "double_click": "Duplo clique", "right_click": "Clique direito"}.get(a, a)
-            out.append(f"### {n}. {label} ({s.x}, {s.y})")
+            out.append(f"### {n}. {label} ({s.x}, {s.y}){mtag}")
             if s.crop:
                 out.append(f"![ancora]({s.crop})")
             # screenshot completo (IPE) — o mais importante para o template
@@ -74,13 +76,13 @@ def to_markdown(recording: Recording, steps: List[Step]) -> str:
             mods, key = s.keys[:-1], s.keys[-1]
             combo = "+".join(mods + [key]) if mods else key
             t_wait = s.t if s.t else 0.0
-            out.append(f"### {n}. Atalho `{combo}` (t+{t_wait:.2f}s)")
+            out.append(f"### {n}. Atalho `{combo}` (t+{t_wait:.2f}s){mtag}")
             out.append("")
         elif a == Action.TYPE.value:
             if s.redacted:
-                out.append(f"### {n}. Digitar `***` [_redigido_] (t+{s.t:.2f}s)")
+                out.append(f"### {n}. Digitar `***` [_redigido_] (t+{s.t:.2f}s){mtag}")
             else:
-                out.append(f"### {n}. Digitar `{s.text}` (t+{s.t:.2f}s)")
+                out.append(f"### {n}. Digitar `{s.text}` (t+{s.t:.2f}s){mtag}")
             if s.screenshot:
                 out.append(f"![tela completa]({s.screenshot})")
             out.append("")

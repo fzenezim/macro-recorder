@@ -50,6 +50,24 @@ def test_click_line_has_coords_and_crop():
     assert "a01.png" in out
 
 
+def test_click_line_with_monitor_tag():
+    """Passo com monitor gravado ganha a tag '[monitor N]' no MD (IPE dinâmica)."""
+    rec = _rec([], dur=1.0)
+    s = Step(action=Action.CLICK.value, t=0.0, x=100, y=200, crop="a01.png",
+             screenshot="screen01.png", monitor=1)
+    out = md.to_markdown(rec, [s])
+    assert "1. Clique (100, 200) [monitor 1]" in out
+    assert "screen01.png" in out
+
+
+def test_click_line_without_monitor_has_no_tag():
+    """Sem monitor gravado → sem tag (retro-compatível)."""
+    rec = _rec([], dur=1.0)
+    s = Step(action=Action.CLICK.value, t=0.0, x=100, y=200)
+    out = md.to_markdown(rec, [s])
+    assert "[monitor" not in out
+
+
 def test_double_click_line():
     rec = _rec([], dur=1.0)
     s = Step(action=Action.DOUBLE_CLICK.value, t=0.0, x=1, y=1)
