@@ -147,7 +147,7 @@ class EventCollector:
         capture_clicks: bool = True,
         capture_scroll: bool = True,
         capture_focus: bool = True,
-        capture_screen_on_click: bool = False,
+        capture_screen_on_click: bool = True,
         is_recording: bool = False,
         on_state_change=None,
     ):
@@ -567,7 +567,7 @@ class Recorder:
         capture_clicks: bool = True,
         capture_scroll: bool = True,
         capture_focus: bool = True,
-        capture_screen_on_click: bool = False,
+        capture_screen_on_click: bool = True,
         on_state_change=None,
     ):
         from pynput import keyboard, mouse  # noqa: F401 — checa disponibilidade

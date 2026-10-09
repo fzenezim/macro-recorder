@@ -460,14 +460,10 @@ def test_double_click_inside_gui_is_not_double(tmp_path, monkeypatch):
 # ── CAPTURA DE TELA AUTOMÁTICA A CADA CLIQUE (IPE) ──────────────────────
 
 
-def test_screen_capture_on_click_disabled_by_default(tmp_path):
-    """Sem a flag, nenhum screenshot é capturado."""
-    c = _collector(tmp_path, capture_screen_on_click=False)
-    _click(c, 100, 200, "left")
-    steps = c.build(0.0)
-    clicks = [s for s in steps if s.action == Action.CLICK.value]
-    assert len(clicks) == 1
-    assert clicks[0].screenshot is None
+def test_screen_capture_on_click_enabled_by_default(tmp_path):
+    """A captura de tela a cada clique é ON por padrão."""
+    c = _collector(tmp_path)  # default = True
+    assert c.capture_screen_on_click is True
 
 
 def test_screen_capture_on_click_enabled(tmp_path):

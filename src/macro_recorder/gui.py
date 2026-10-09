@@ -346,6 +346,9 @@ class MacroRecorderApp(ctk.CTk):
             fg_color=ACCENT, hover_color=ACCENT_HOVER,
         )
         self.chk_screen_click.grid(row=1, column=0, padx=(0, 12), sticky="w", pady=4)
+        # ON por padrão: a gravação já nasce com screenshots por clique
+        # (padrão do IPE). Se o usuário não quiser, ele desmarca.
+        self.chk_screen_click.select()
 
         # advanced
         adv = ctk.CTkFrame(settings, fg_color="transparent")
