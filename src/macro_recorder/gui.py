@@ -345,9 +345,6 @@ class MacroRecorderApp(ctk.CTk):
         )
         self.chk_screen_click.grid(row=1, column=0, padx=(0, 12), sticky="w", pady=4)
 
-        # monitor selector (p/ captura de tela)
-        # (o seletor fica na linha dos botões de captura de tela)
-
         # advanced
         adv = ctk.CTkFrame(settings, fg_color="transparent")
         adv.grid(row=3, column=0, columnspan=3, sticky="ew", padx=8, pady=(4, 12))
@@ -400,31 +397,16 @@ class MacroRecorderApp(ctk.CTk):
         )
         self.btn_cancel.pack(side="left", padx=(8, 0))
 
-        # botões de captura de tela
-        screen_btns = ctk.CTkFrame(main, fg_color="transparent")
-        screen_btns.grid(row=2, column=1, sticky="ew", pady=(0, 10), padx=(12, 0))
-        self.btn_screen = ctk.CTkButton(
-            screen_btns, text="📸 Capturar tela", font=FONT_BODY, height=40,
-            fg_color="#3b82f6", hover_color="#2563eb",
-            command=self._capture_screen,
-        )
-        self.btn_screen.pack(side="left", fill="x", padx=(0, 8))
-        self.opt_monitor = ctk.CTkOptionMenu(
-            screen_btns, values=["monitor 1", "monitor 2", "monitor 3"],
-            width=110, font=FONT_BODY, text_color=TEXT,
-            fg_color=CARD, button_color=CARD_HOVER, dropdown_fg_color=CARD,
-        )
-        self.opt_monitor.set("monitor 1")
-        self.opt_monitor.pack(side="left")
-
         # hint
         ctk.CTkLabel(
             main,
             text="Ao gravar: aperte o hotkey (F9) para LIGAR, faça a tarefa, "
                  "aperte de novo para PARAR. Jogue o mouse no canto "
-                 "superior-esquerdo (FailSafe) para abortar à força.",
+                 "superior-esquerdo (FailSafe) para abortar à força.\n"
+                 "Marque '📸 Tela a cada clique' para gerar screenshots "
+                 "automáticos (formato IPE) em cada mouse click.",
             font=FONT_SMALL, text_color=TEXT_DIM, justify="left", wraplength=820,
-        ).grid(row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 6))
+        ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 6))
 
         # console
         cons = ctk.CTkFrame(main, fg_color=CONSOLE_BG, corner_radius=10)
@@ -689,29 +671,6 @@ class MacroRecorderApp(ctk.CTk):
             "[record] Para parar: aperte o hotkey de novo "
             "(ou jogue o mouse no canto superior esquerdo p/ abortar)."
         )
-
-    def _capture_screen(self):
-        """Captura a tela do monitor selecionado."""
-        mon_label = self.opt_monitor.get()  # "monitor 1", "monitor 2", "monitor 3"
-        mon_idx = int(mon_label.split()[1]) - 1  # 0-based
-
-        try:
-            from macro_recorder.capture import capture_monitor
-            from datetime import datetime
-
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_path = Path("screenshots") / f"screen_{ts}_m{mon_idx}.png"
-            capture_monitor(mon_idx, out_path=out_path)
-            self._log(f"[screen] ✅ tela capturada: {out_path}")
-            # se estiver gravando, adiciona ao recording como evento
-            rec = self._rec
-            if rec is not None and rec._running:
-                rec.handle_screenshot(mon_idx)
-                self._log(f"[screen] 📊 screenshot adicionado à gravação")
-        except Exception as e:
-            self._log(f"[screen] ERRO: {repr(e)}")
-            import traceback
-            self._log(traceback.format_exc().replace("\n", " | "))
 
     def _pick_out_dir(self):
         import tkinter.filedialog as fd
