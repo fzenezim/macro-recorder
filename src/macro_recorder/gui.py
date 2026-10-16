@@ -338,14 +338,14 @@ class MacroRecorderApp(ctk.CTk):
             toggles, text="🪟 Janela em foco", font=FONT_BODY, text_color=TEXT,
             fg_color=ACCENT, hover_color=ACCENT_HOVER,
         )
-        self.chk_focus.grid(row=0, column=3, padx=(0, 12), sticky="w", pady=4)
+        self.chk_focus.grid(row=1, column=0, padx=(0, 12), sticky="w", pady=4)
         self.chk_focus.select()
 
         self.chk_screen_click = ctk.CTkCheckBox(
             toggles, text="📸 Tela a cada clique (IPE)", font=FONT_BODY, text_color=TEXT,
             fg_color=ACCENT, hover_color=ACCENT_HOVER,
         )
-        self.chk_screen_click.grid(row=1, column=0, padx=(0, 12), sticky="w", pady=4)
+        self.chk_screen_click.grid(row=1, column=1, padx=(0, 12), sticky="w", pady=4)
         # ON por padrão: a gravação já nasce com screenshots por clique
         # (padrão do IPE). Se o usuário não quiser, ele desmarca.
         self.chk_screen_click.select()
