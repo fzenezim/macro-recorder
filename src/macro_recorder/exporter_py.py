@@ -178,17 +178,22 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
     if a == Action.CLICK.value:
         if s.crop:
             crops_arg = f", crops={s.crops!r}" if s.crops else ""
-            return f"    _click(crop={s.crop!r}{crops_arg}, x={s.x}, y={s.y})"
+            # x=None, y=None → _click vai chamar _locate (matcher visual)
+            # para achar a âncora na posição ATUAL. Passar os valores
+            # fixos da gravação ignoraria o matcher e clicaria no ponto
+            # onde o usuário clicou na gravação (posicao errada se a
+            # janela se moveu).
+            return f"    _click(crop={s.crop!r}{crops_arg}, x=None, y=None)"
         return f"    _click(x={s.x}, y={s.y})"
     if a == Action.DOUBLE_CLICK.value:
         if s.crop:
             crops_arg = f", crops={s.crops!r}" if s.crops else ""
-            return f"    _double_click(crop={s.crop!r}{crops_arg}, x={s.x}, y={s.y})"
+            return f"    _double_click(crop={s.crop!r}{crops_arg}, x=None, y=None)"
         return f"    _double_click(x={s.x}, y={s.y})"
     if a == Action.RIGHT_CLICK.value:
         if s.crop:
             crops_arg = f", crops={s.crops!r}" if s.crops else ""
-            return f"    _right_click(crop={s.crop!r}{crops_arg}, x={s.x}, y={s.y})"
+            return f"    _right_click(crop={s.crop!r}{crops_arg}, x=None, y=None)"
         return f"    _right_click(x={s.x}, y={s.y})"
     if a == Action.KEY.value:
         return f"    _key({s.keys!r})"
