@@ -1,11 +1,26 @@
 # build_exe.py
 # Prepara os artefatos para o .exe self-contained:
-#   1) copia deps (pyautogui, pynput, Pillow, mss, mouseinfo) -> build/_bundle/site-packages
-#   2) baixa/usa python-build-standalone -> build/_bundle/python_standalone/
-#   3) roda PyInstaller com a spec
+#   1) instala as deps de RUNTIME (replay) num venv 3.11 limpo
+#      -> build/_bundle/site-packages   (compativel com o python_standalone 3.11)
+#   2) copia o pacote macro_recorder -> build/_bundle/macro_recorder
+#   3) baixa/usa python-build-standalone 3.11 -> build/_bundle/python_standalone/
+#   4) roda PyInstaller com a spec (onedir)
 # Executar:  .venv\Scripts\python build_exe.py
+#
+# POR QUE instalar para o 3.11 (nao copiar do .venv dev):
+#   O botao de Replay executa `<standalone>/python.exe -m macro_recorder replay`
+#   em um mini-venv montado a partir do python_standalone (3.11) + este
+#   site-packages embutido. Se este site-packages for copiado do .venv do
+#   desenvolvimento (que roda numa versao DIFERENTE do 3.11, ex.: 3.14), os
+#   .pyd cp3XX do numpy/cv2 falham no venv 3.11 -> import cv2 ImportError ->
+#   pyautogui (que importa cv2 p/ opencv) quebra -> os cliques/mouse NUNCA
+#   funcionam no replay (a tela nao "ativa" o menu), e o pyperclip tambem
+#   falha -> o texto cai no fallback pyautogui.typewrite (ASCII-only) ->
+#   acentos se corrompem ("Olá" vira "Ol'a"). Instalar para o 3.11 resolve os
+#   dois defeitos de uma vez.
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -20,17 +35,17 @@ BUILD = ROOT / "build" / "_bundle"
 SITE = BUILD / "site-packages"
 STANDALONE = BUILD / "python_standalone"
 
-# deps runtime (as que o replay precisa; mirror do pyproject.toml)
+# Deps que o subprocess de replay precisa (espelha o runtime do pyproject.toml).
+# Sao instaladas no venv 3.11 abaixo (nao copiadas do .venv dev).
 RUNTIME_DEPS = [
     "pyautogui",
-    "mouseinfo",
     "pynput",
+    "pyperclip",
     "Pillow",
     "mss",
-    "openpyxl",
-    "pyperclip",
     "opencv-python",
     "numpy",
+    "openpyxl",
     "pywin32",
 ]
 
@@ -39,50 +54,102 @@ def log(msg: str) -> None:
     print(f"[build-exe] {msg}")
 
 
-def copy_deps() -> None:
-    log("Copiando deps runtime para o bundle...")
-    SITE.mkdir(parents=True, exist_ok=True)
-    # site-packages do venv
-    src_site = VENV_PY.parent.parent / "Lib" / "site-packages"
-    if not src_site.exists():
-        src_site = Path(sysconfig_paths())  # fallback
-    # mapeia pacotes por top-level name
-    top_map = {
-        "pyautogui": ["pyautogui", "pygetwindow", "mouseinfo", "pymsgbox", "PyGetText"],
-        "mouseinfo": ["mouseinfo"],
-        "pynput": ["pynput"],
-        "Pillow": ["PIL", "Pillow"],
-        "mss": ["mss"],
-        "openpyxl": ["openpyxl", "et_xmlfile"],
-        "pyperclip": ["pyperclip"],
-        "opencv-python": ["cv2", "opencv_python"],
-        "numpy": ["numpy"],
-        "pywin32": ["win32com", "win32ui", "win32con", "win32api", "win32process", "win32gui", "win32api", "Pythonwin", "pywintypes"],
-    }
-    needed = set()
-    for v in top_map.values():
-        needed.update(v)
-
-    for item in src_site.iterdir():
-        if item.name in needed or item.parent != src_site:
-            dest = SITE / item.name
-            if dest.exists():
-                dest.unlink() if dest.is_file() else shutil.rmtree(dest, ignore_errors=True)
-            if item.is_dir():
-                shutil.copytree(item, dest, symlinks=True, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, dest)
-            log(f"  + {item.name}")
-    # também copia dist-info
-    for d in src_site.iterdir():
-        if d.is_dir() and (d.name.endswith(".dist-info") or d.name.endswith(".egg-info")):
-            pkg = d.name.split(".")[0]
-            if any(pkg in [x.lower() for x in needed] or pkg.lower() in [x.lower() for x in needed] for _ in [0]):
-                dest = SITE / d.name
-                if not dest.exists():
-                    shutil.copytree(d, dest, symlinks=True, dirs_exist_ok=True)
+# ---------------------------------------------------------------------------
+# 1) site-packages compativel com o python_standalone (3.11)
+# ---------------------------------------------------------------------------
+def _pyversion(python: Path) -> str:
+    r = subprocess.run(
+        [str(python), "-c", "import sys; print('.'.join(map(str, sys.version_info[:2])))"],
+        capture_output=True, text=True, check=True,
+    )
+    return r.stdout.strip()
 
 
+def _venv_site_for(venv_root: Path) -> Path:
+    if os.name == "nt":
+        return venv_root / "Lib" / "site-packages"
+    return venv_root / "lib" / "python3" / "site-packages"
+
+
+def _pip(venv_root: Path) -> list[str]:
+    pipx = venv_root / ("Scripts/pip.exe" if os.name == "nt" else "bin/pip")
+    if pipx.exists():
+        return [str(pipx)]
+    py = venv_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return [str(py), "-m", "pip"]
+
+
+def _validate_site(venv_root: Path) -> list[str]:
+    """Importa o pipeline de replay NO interpretador do 3.11; devolve a lista
+    de pacotes com problema (deve ser vazia)."""
+    py = venv_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    code = (
+        "import importlib.util, importlib, sys;"
+        "mods=['pyperclip','pyautogui','cv2','pynput','numpy','mss'];"
+        "bad=[m for m in mods if not importlib.util.find_spec(m)];"
+        "import cv2, numpy, PyAutoGUI;"  # importa de verdade (forca o .pyd)
+        "print('\\n'.join(bad));"
+        "print('CV2 ' + cv2.__version__ + ' NUMPY ' + numpy.__version__);"
+    )
+    r = subprocess.run([str(py), "-c", code], capture_output=True, text=True)
+    out = (r.stdout or "").strip()
+    log(f"  validate: {out.replace(chr(10), ' | ')}")
+    if r.returncode != 0:
+        tail = (r.stderr or "").strip().splitlines()[-3:]
+        log("  validate ERR: " + " / ".join(tail))
+    bad = [ln for ln in out.splitlines() if ln and not ln.startswith("CV2")]
+    return bad
+
+
+def _bundle_site_packages() -> None:
+    """Instala RUNTIME_DEPS num venv 3.11 limpo (do python_standalone embutido)
+    e copia o site-packages resultante para build/_bundle/site-packages — o que
+    o _mrec_runtimes venv embutir e o que o replay subprocess usa em runtime."""
+    log("Instalando deps de replay para o Python 3.11 (standalone)...")
+    host_py = STANDALONE / ("python.exe" if os.name == "nt" else "python3")
+    if not host_py.exists():
+        raise SystemExit(
+            "python_standalone ausente; rode com MREC_WITH_STANDALONE=1 "
+            "(o site-deps deve ser compativel com a versao do runtime)"
+        )
+    ver = _pyversion(host_py)
+    log(f"  standalone python: {ver}")
+
+    venv_root = BUILD / "_runtime_venv"
+    venv_root_sp = _venv_site_for(venv_root)
+    if venv_root_sp.exists():
+        shutil.rmtree(venv_root_sp, ignore_errors=True)
+
+    # venv limpo COM pip (o standalone do python-build-standalone tem pip)
+    subprocess.run([str(host_py), "-m", "venv", str(venv_root)], check=True)
+
+    pip = _pip(venv_root)
+    # instala tudo de uma vez; --only-binary quando possivel, senao sdist (pyautogui)
+    subprocess.run(
+        pip + ["install", "--upgrade", "pip"],
+        capture_output=True,
+    )
+    subprocess.run(
+        pip + ["install", "--quiet", "--no-input"] + RUNTIME_DEPS,
+        check=True,
+        capture_output=False,
+    )
+
+    bad = _validate_site(venv_root)
+    if bad:
+        log(f"  avisando: pacotes sem entrypoint importavel: {bad}")
+
+    # copia o site-packages validado para o bundle
+    if SITE.exists():
+        shutil.rmtree(SITE, ignore_errors=True)
+    shutil.copytree(venv_root_sp, SITE, symlinks=True, dirs_exist_ok=True)
+    n = len([p for p in SITE.iterdir()])
+    log(f"  site-packages (3.11) pronto em {SITE.relative_to(ROOT)} ({n} itens)")
+
+
+# ---------------------------------------------------------------------------
+# 2) pacote macro_recorder
+# ---------------------------------------------------------------------------
 def copy_package() -> None:
     log("Copia o pacote macro_recorder para o bundle...")
     dest_pkg = BUILD / "macro_recorder"
@@ -94,14 +161,18 @@ def copy_package() -> None:
         shutil.copy2(SRC / "pyproject.toml", BUILD / "pyproject.toml")
 
 
+# ---------------------------------------------------------------------------
+# 3) python-build-standalone
+# ---------------------------------------------------------------------------
 def get_standalone() -> None:
     """Baixa python-build-standalone do GitHub (uma unica vez).
     A URL e a estrutura da pasta variam entre releases — se o download fallar
-    com 404, atualize PYS_SA_URL para a release mais recente em
+    com 404, atualize para a release mais recente em
     https://github.com/astral-sh/python-build-standalone/releases
     (procure por cpython-3.11.x+YYYYMMDD-x86_64-pc-windows-msvc-install_only.tar.gz).
     Versao verificada: 3.11.17+20261013-win64."""
-    if STANDALONE.exists() and (STANDALONE / ( "python.exe" if os.name == "nt" else "python3")).exists():
+    target = "python.exe" if os.name == "nt" else "python3"
+    if STANDALONE.exists() and (STANDALONE / target).exists():
         log("python standalone ja presente, pulando download")
         return
     log("Baixando python-build-standalone 3.11.17 (win64)...")
@@ -116,11 +187,9 @@ def get_standalone() -> None:
     import tarfile
     with tarfile.open(archive, "r:gz") as tar:
         tar.extractall(BUILD)
-    # o tar extrai em cpython-3.11.9+.../python311/... ou similar
     standalone_dir = _find_standalone_root(BUILD)
     if standalone_dir is None:
         raise RuntimeError("nao encontrei a raiz do standalone após extrair")
-    # copia o essencial para build/_bundle/python_standalone
     if STANDALONE.exists():
         shutil.rmtree(STANDALONE, ignore_errors=True)
     os.replace(standalone_dir, STANDALONE)
@@ -142,6 +211,9 @@ def _find_standalone_root(root: Path) -> Path | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# 4) PyInstaller + pos-processing
+# ---------------------------------------------------------------------------
 def run_pyinstaller() -> None:
     log("Rodando PyInstaller (onedir)...")
     # Nao uso --clean: o clear do cache do PyInstaller (C:\AppData\Local\pyinstaller)
@@ -161,13 +233,11 @@ def place_icon() -> None:
         return
     if not onedir.exists():
         raise RuntimeError(f"{onedir} nao existe apos o build")
-    # raiz visivel do onedir
     root_ico = onedir / "icon.ico"
     if root_ico.exists():
         root_ico.unlink()
     shutil.copy2(ico, root_ico)
     log(f"  + {root_ico.relative_to(ROOT)}")
-    # remove o icone que o COLLECT pode ter deixado em _internal/ (buried)
     buried = onedir / "_internal" / "icon.ico"
     if buried.exists():
         buried.unlink()
@@ -192,19 +262,13 @@ def package_zip() -> None:
     log(f"zip pronto: {zip_path.name} ({zip_path.stat().st_size // 1024 // 1024} MB)")
 
 
-def sysconfig_paths() -> str:
-    r = subprocess.run([str(VENV_PY), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"], capture_output=True, text=True, check=True)
-    return r.stdout.strip()
-
-
 def main() -> None:
     BUILD.mkdir(parents=True, exist_ok=True)
+    # O site-deps precisa existir para o build; o standalone eh obrigatorio
+    # (ele define a versao do python do venv de runtime).
+    get_standalone()
     copy_package()
-    copy_deps()
-    # standalone opcional (se o usuario nao quiser baixar, o exe ainda
-    # funciona com python no PATH para replay)
-    if os.environ.get("MREC_WITH_STANDALONE"):
-        get_standalone()
+    _bundle_site_packages()
     run_pyinstaller()
     place_icon()
     package_zip()
