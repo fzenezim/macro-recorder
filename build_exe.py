@@ -87,7 +87,7 @@ def _validate_site(venv_root: Path) -> list[str]:
         "import importlib.util, importlib, sys;"
         "mods=['pyperclip','pyautogui','cv2','pynput','numpy','mss'];"
         "bad=[m for m in mods if not importlib.util.find_spec(m)];"
-        "import cv2, numpy, PyAutoGUI;"  # importa de verdade (forca o .pyd)
+        "import cv2, numpy, pyautogui;"  # importa de verdade (forca o .pyd)
         "print('\\n'.join(bad));"
         "print('CV2 ' + cv2.__version__ + ' NUMPY ' + numpy.__version__);"
     )
