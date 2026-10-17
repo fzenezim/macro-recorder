@@ -4,13 +4,14 @@ do bundle PyInstaller, permitindo que o botao de Replay funcione sem
 Python no sistema.
 
 Como funciona:
-    1. O .exe (one-file) extrai o bundle em <TEMP>/_MEIxxxx/ (auto).
+    1. No onedir (build atual), o .exe ja carrega o bundle direto de
+       <EXE>/_internal/ (sem self-extract temporario).
     2. A spec inclui o pacote macro_recorder + deps no `datas` -> em
-       <TEMP>/_MEIxxxx/macro_recorder e em <TEMP>/_MEIxxxx/site-packages/*.
-    3. No 1o replay, runtime_python() extrai para
-       <TEMP>/mrec_runtimes/<hash>/venv um Python "portable" (python-build-
-       standalone embutido como `python.exe` no datas) + o site-packages
-       do bundle.
+       <EXE>/_internal/macro_recorder e em <EXE>/_internal/site-packages/*.
+    3. No 1o replay, runtime_python() monta em <EXE>/_mrec_runtimes/<hash>/venv
+       um Python "portable" (python-build-standalone embutido como `python.exe`
+       no datas) + o site-packages do bundle. (Em builds antigos onefile, a
+       base era <TEMP>/mrec_runtimes/ — a escolha é transparente.)
     4. Depois o mini-venv está pronto; replay instantaneo.
 
 Em modo dev (venv ativo) runtime_python() retorna o venv normalmente.
@@ -33,7 +34,15 @@ def _frozen() -> bool:
 
 
 def _temp_base() -> Path:
-    root = Path(os.environ.get("TEMP") or os.environ.get("TMP") or str(Path.home()))
+    # No modo onedir, o runtime fica junto ao .exe (pasta persistente, sem
+    # self-extract em %TEMP% a cada lancamento — evita o padrao que os motores
+    # comportamentais de AV flagam e sobrevive a limpeza do Temp). No onefile,
+    # continua em <TEMP> como antes.
+    root = None
+    if _frozen() and hasattr(sys, "_MEIPASS"):
+        root = Path(sys._MEIPASS).parent
+    if root is None:
+        root = Path(os.environ.get("TEMP") or os.environ.get("TMP") or str(Path.home()))
     return root / _RUNTIME_BASE
 
 

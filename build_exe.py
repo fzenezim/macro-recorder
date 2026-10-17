@@ -29,6 +29,9 @@ RUNTIME_DEPS = [
     "mss",
     "openpyxl",
     "pyperclip",
+    "opencv-python",
+    "numpy",
+    "pywin32",
 ]
 
 
@@ -52,6 +55,9 @@ def copy_deps() -> None:
         "mss": ["mss"],
         "openpyxl": ["openpyxl", "et_xmlfile"],
         "pyperclip": ["pyperclip"],
+        "opencv-python": ["cv2", "opencv_python"],
+        "numpy": ["numpy"],
+        "pywin32": ["win32com", "win32ui", "win32con", "win32api", "win32process", "win32gui", "win32api", "Pythonwin", "pywintypes"],
     }
     needed = set()
     for v in top_map.values():
@@ -90,12 +96,20 @@ def copy_package() -> None:
 
 def get_standalone() -> None:
     """Baixa python-build-standalone do GitHub (uma unica vez).
-    Versiones verificadas: 3.11.9-win64."""
-    if STANDALONE.exists() and (STANDALONE / ("python.exe" if os.name == "nt" else "python3")).exists():
+    A URL e a estrutura da pasta variam entre releases — se o download fallar
+    com 404, atualize PYS_SA_URL para a release mais recente em
+    https://github.com/astral-sh/python-build-standalone/releases
+    (procure por cpython-3.11.x+YYYYMMDD-x86_64-pc-windows-msvc-install_only.tar.gz).
+    Versao verificada: 3.11.17+20261013-win64."""
+    if STANDALONE.exists() and (STANDALONE / ( "python.exe" if os.name == "nt" else "python3")).exists():
         log("python standalone ja presente, pulando download")
         return
-    log("Baixando python-build-standalone 3.11.9 (win64)...")
-    url = "https://github.com/indygreg/python-build-standalone/releases/download/20240811/cpython-3.11.9+20240811-x86_64-pc-windows-msvc-install_only.tar.gz"
+    log("Baixando python-build-standalone 3.11.17 (win64)...")
+    url = os.environ.get(
+        "MREC_PYS_URL",
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        "20261013/cpython-3.11.17%2B20261013-x86_64-pc-windows-msvc-install_only.tar.gz",
+    )
     archive = ROOT / "build" / "pysa.tar.gz"
     download(url, archive)
     log("Extraindo...")
@@ -129,8 +143,53 @@ def _find_standalone_root(root: Path) -> Path | None:
 
 
 def run_pyinstaller() -> None:
-    log("Rodando PyInstaller...")
+    log("Rodando PyInstaller (onedir)...")
+    # Nao uso --clean: o clear do cache do PyInstaller (C:\AppData\Local\pyinstaller)
+    # briga com o reparse point do OneDrive na pasta build/ e deixa PermissionError
+    # em build/macrorecorder/localpycs. Limpar manualmente o output e suficiente.
     subprocess.run([str(VENV_PY), "-m", "PyInstaller", "macrorecorder.spec", "--noconfirm"], check=True)
+
+
+def place_icon() -> None:
+    """Coloca um .ico na raiz do onedir (o Explorer de Win 10/11 le o icone da
+    pasta a partir do primeiro *.ico da raiz) e remove qualquer .ico espurios
+    que o PyInstaller deixou escondidos em _internal/ (icone errando de lugar)."""
+    ico = ROOT / "icon.ico"
+    onedir = ROOT / "dist" / "macrorecorder"
+    if not ico.exists():
+        log("icon.ico nao existe na raiz do projeto; pulei o posicionamento")
+        return
+    if not onedir.exists():
+        raise RuntimeError(f"{onedir} nao existe apos o build")
+    # raiz visivel do onedir
+    root_ico = onedir / "icon.ico"
+    if root_ico.exists():
+        root_ico.unlink()
+    shutil.copy2(ico, root_ico)
+    log(f"  + {root_ico.relative_to(ROOT)}")
+    # remove o icone que o COLLECT pode ter deixado em _internal/ (buried)
+    buried = onedir / "_internal" / "icon.ico"
+    if buried.exists():
+        buried.unlink()
+        log(f"  - removido _internal/icon.ico (buried)")
+
+
+def package_zip() -> None:
+    """Empacota dist/macrorecorder/ em um zip (o artefato que o usuario baixa;
+    VT e end-users preferem o zip a uma pasta solta)."""
+    log("Empacotando zip...")
+    onedir = ROOT / "dist" / "macrorecorder"
+    if not onedir.exists():
+        raise RuntimeError(f"{onedir} nao existe apos o build")
+    zip_path = ROOT / "dist" / "macrorecorder-win64.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    import zipfile
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for f in sorted(onedir.rglob("*")):
+            if f.is_file():
+                z.write(f, f.relative_to(onedir.parent))
+    log(f"zip pronto: {zip_path.name} ({zip_path.stat().st_size // 1024 // 1024} MB)")
 
 
 def sysconfig_paths() -> str:
@@ -147,7 +206,9 @@ def main() -> None:
     if os.environ.get("MREC_WITH_STANDALONE"):
         get_standalone()
     run_pyinstaller()
-    log("DONE -> dist/macrorecorder.exe")
+    place_icon()
+    package_zip()
+    log("DONE -> dist/macrorecorder/  (exe onedir) + dist/macrorecorder-win64.zip")
 
 
 if __name__ == "__main__":

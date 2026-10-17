@@ -17,6 +17,9 @@ dependencies = [
     "mss>=9.0",
     "openpyxl>=3.1",
     "pyperclip>=1.8",
+    "opencv-python>=4.8",
+    "numpy>=1.26",
+    "pywin32>=306",
 ]
 
 [project.optional-dependencies]
