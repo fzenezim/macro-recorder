@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 
 class Action(str, Enum):
@@ -65,6 +65,9 @@ class Step:
     # crops em cascata (fallbacks maiores, ex.: [a01.png, a01b.png, a01c.png])
     crops: Optional[list] = None  # caminhos relativos dos fallbacks
 
+    # offset (dx, dy) do clique dentro do crop âncora — permite cliques exatos no replay
+    crop_off: Optional[Tuple[int, int]] = None
+
     # ── serialização ───────────────────────────────────────────────────────
     def to_dict(self) -> dict:
         """Seriáliza para dict JSON-able (só campos com valor)."""
@@ -92,6 +95,8 @@ class Step:
             d["timestamp"] = self.timestamp
         if self.crops is not None:
             d["crops"] = list(self.crops)
+        if self.crop_off is not None:
+            d["crop_off"] = list(self.crop_off)
         return d
 
     @classmethod
@@ -112,6 +117,10 @@ class Step:
             monitor=d.get("monitor"),
             timestamp=d.get("timestamp"),
             crops=d.get("crops"),
+            crop_off=(
+                (int(d["crop_off"][0]), int(d["crop_off"][1]))
+                if d.get("crop_off") else None
+            ),
         )
 
 

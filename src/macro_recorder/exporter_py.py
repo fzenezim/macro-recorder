@@ -5,6 +5,25 @@ from pathlib import Path
 from typing import List
 from macro_recorder.events import Step, Action
 
+def _confs_for(conf: float) -> tuple:
+    """Cascata de confidências a partir do valor escolhido na GUI.
+
+    Começa na confiança selecionada (nunca abaixo do FLOOR 0.8) e desce
+    em passos de 0.05 até o floor — 0.7 achava âncora errada (bug: cliques
+    em pontos aleatórios), então o replay nunca cai abaixo de 0.8.
+    """
+    c = max(float(conf), 0.8)
+    out = []
+    while c > 0.8 + 1e-6:
+        out.append(round(c, 2))
+        c -= 0.05
+    out.append(0.8)
+    seen = []
+    for v in out:
+        if v not in seen:
+            seen.append(v)
+    return tuple(seen)
+
 def _tpl_header(n_steps, duration_s, generated_at):
     lines = [
         '# -*- coding: utf-8 -*-',
@@ -12,6 +31,7 @@ def _tpl_header(n_steps, duration_s, generated_at):
         f'# Replay de {n_steps} passos (duracao {duration_s:.2f}s)',
         '',
         'import sys',
+        'import os',
         'import time',
         'from pathlib import Path',
         '',
@@ -20,18 +40,21 @@ def _tpl_header(n_steps, duration_s, generated_at):
         'BASE = Path(__file__).resolve().parent',
         'pyautogui.FAILSAFE = True',
         'DRY_RUN = "--dry-run" in sys.argv',
+        '# pausa entre passos (setada pela GUI via MREC_PAUSE; 0 = sem pausa)',
+        'PAUSE = float(os.environ.get("MREC_PAUSE", "0") or 0)',
         '',
     ]
     return "\n".join(lines) + "\n"
 
-def _tpl_helpers():
-    return '''
-def _locate(crop, confs=(0.9, 0.8, 0.7)):
-    """Localiza a crop na tela com confidence em cascata.
+def _tpl_helpers(confs=(0.9, 0.8)):
+    confs_repr = repr(tuple(confs))
+    body = '''
+def _locate(crop, off=None, confs=__CONFS__):
+    """Localiza a crop na tela e devolve o ponto EXATO do clique.
 
-    Se nenhum nível de confiança achar a âncora, retorna None
-    (NUNCA usa o matching sem confidence — TM_CCOEFF acha qualquer
-    pixel na tela e o clique cai em lugar errado).
+    `off` = offset do clique DENTRO do crop (gravado na gravação).
+    Sem `off` cai para o centro (compat com gravações antigas).
+    Confidence em cascata com FLOOR 0.8 — 0.7 achava âncora errada.
     """
     if DRY_RUN:
         return (None, None)
@@ -42,20 +65,19 @@ def _locate(crop, confs=(0.9, 0.8, 0.7)):
         try:
             box = pyautogui.locateOnScreen(str(p), confidence=c)
         except AssertionError:
-            # locateOnScreen com confidence pode levantar em
-            # edge cases (imagem grande, etc) — ignora e tenta o
-            # próximo nível (nunca cai no matching sem confidence).
             continue
         if box is not None:
+            if off is not None:
+                return (box.left + off[0], box.top + off[1])
             return pyautogui.center(box)
     return None
 
-def _click(crop=None, crops=None, x=None, y=None):
+def _click(crop=None, crops=None, x=None, y=None, off=None):
     """Clica. Se `crops` (lista), tenta cada uma em cascata até localizar."""
     if x is None:
         for c in ([crop] if crop else []) + (crops or []):
             if c:
-                pt = _locate(c)
+                pt = _locate(c, off=off)
                 if pt:
                     x, y = pt
                     break
@@ -70,11 +92,11 @@ def _click(crop=None, crops=None, x=None, y=None):
     print(f"  click ({x}, {y})")
     pyautogui.click(x, y)
 
-def _double_click(crop=None, crops=None, x=None, y=None):
+def _double_click(crop=None, crops=None, x=None, y=None, off=None):
     if x is None:
         for c in ([crop] if crop else []) + (crops or []):
             if c:
-                pt = _locate(c)
+                pt = _locate(c, off=off)
                 if pt:
                     x, y = pt
                     break
@@ -89,11 +111,11 @@ def _double_click(crop=None, crops=None, x=None, y=None):
     print(f"  double-click ({x}, {y})")
     pyautogui.doubleClick(x, y)
 
-def _right_click(crop=None, crops=None, x=None, y=None):
+def _right_click(crop=None, crops=None, x=None, y=None, off=None):
     if x is None:
         for c in ([crop] if crop else []) + (crops or []):
             if c:
-                pt = _locate(c)
+                pt = _locate(c, off=off)
                 if pt:
                     x, y = pt
                     break
@@ -167,7 +189,18 @@ def _wait(s):
     if s > 0.01:
         print(f"  wait {s:.2f}")
         time.sleep(s)
-'''
+
+def _pause():
+    """Pausa fixa entre passos (MREC_PAUSE, setada pela GUI)."""
+    if PAUSE <= 0:
+        return
+    if DRY_RUN:
+        print(f"  [dry] pause {PAUSE:.1f}")
+        return
+    print(f"  pause {PAUSE:.1f}")
+    time.sleep(PAUSE)
+'''.replace("__CONFS__", confs_repr)
+    return body
 def _step_line(s: Step, dry_run: bool = False) -> str:
     """Um passo -> 1 linha (ou blocos) no replay."""
     a = s.action
@@ -178,22 +211,23 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
     if a == Action.CLICK.value:
         if s.crop:
             crops_arg = f", crops={s.crops!r}" if s.crops else ""
+            off_arg = f", off={s.crop_off!r}" if s.crop_off is not None else ""
             # x=None, y=None → _click vai chamar _locate (matcher visual)
-            # para achar a âncora na posição ATUAL. Passar os valores
-            # fixos da gravação ignoraria o matcher e clicaria no ponto
-            # onde o usuário clicou na gravação (posicao errada se a
-            # janela se moveu).
-            return f"    _click(crop={s.crop!r}{crops_arg}, x=None, y=None)"
+            # para achar a âncora na posição ATUAL. `off` é o offset do
+            # clique DENTRO do crop — clica no ponto exato, não no centro.
+            return f"    _click(crop={s.crop!r}{crops_arg}{off_arg}, x=None, y=None)"
         return f"    _click(x={s.x}, y={s.y})"
     if a == Action.DOUBLE_CLICK.value:
         if s.crop:
             crops_arg = f", crops={s.crops!r}" if s.crops else ""
-            return f"    _double_click(crop={s.crop!r}{crops_arg}, x=None, y=None)"
+            off_arg = f", off={s.crop_off!r}" if s.crop_off is not None else ""
+            return f"    _double_click(crop={s.crop!r}{crops_arg}{off_arg}, x=None, y=None)"
         return f"    _double_click(x={s.x}, y={s.y})"
     if a == Action.RIGHT_CLICK.value:
         if s.crop:
             crops_arg = f", crops={s.crops!r}" if s.crops else ""
-            return f"    _right_click(crop={s.crop!r}{crops_arg}, x=None, y=None)"
+            off_arg = f", off={s.crop_off!r}" if s.crop_off is not None else ""
+            return f"    _right_click(crop={s.crop!r}{crops_arg}{off_arg}, x=None, y=None)"
         return f"    _right_click(x={s.x}, y={s.y})"
     if a == Action.KEY.value:
         return f"    _key({s.keys!r})"
@@ -209,16 +243,20 @@ def _step_line(s: Step, dry_run: bool = False) -> str:
     return "    pass"
 
 
-def to_python(steps: List[Step], dry_run: bool = False) -> str:
+def to_python(steps: List[Step], dry_run: bool = False,
+              confidence: float = 0.9) -> str:
     """Gera o replay.py completo.
 
-    Quando `data.xlsx` existir na pasta da gravação, o replay itera uma vez
-    por linha e substitui {placeholder} nos passos TYPE pelos valores da
-    coluna correspondente. Sem data.xlsx → 1 execução (comportamento atual).
+    `confidence` = confiança escolhida na GUI — vira a cascata inicial do
+    _locate (com floor 0.8). Quando `data.xlsx` existir na pasta da
+    gravação, o replay itera uma vez por linha e substitui {placeholder}
+    nos passos TYPE pelos valores da coluna correspondente. Sem data.xlsx
+    → 1 execução (comportamento atual).
     """
+    confs = _confs_for(confidence)
     header = _tpl_header(len(steps), sum(s.t for s in steps) if steps else 0.0,
                           _dt.now().isoformat())
-    helpers = _tpl_helpers()
+    helpers = _tpl_helpers(confs)
     lines = [
         "def run(data_row=None):",
         "    print('replay...')",
@@ -231,6 +269,8 @@ def to_python(steps: List[Step], dry_run: bool = False) -> str:
         if delta > 0.005:
             lines.append(f"    _wait({delta:.3f})")
         lines.append(_step_line(s, dry_run))
+        # pausa fixa entre passos (MREC_PAUSE>0, setado pela GUI)
+        lines.append("    _pause()")
         last_t = s.t
     lines.append("    print('done.')")
     lines.append("")
@@ -285,9 +325,11 @@ def _footer_data() -> List[str]:
     ]
 
 
-def export_py(steps: List[Step], out_path: Path | str, dry_run: bool = False) -> Path:
-    """Escreve replay.py em `out_path`."""
+def export_py(steps: List[Step], out_path: Path | str, dry_run: bool = False,
+              confidence: float = 0.9) -> Path:
+    """Escreve replay.py em `out_path` (confidence = confiança da GUI)."""
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(to_python(steps, dry_run=dry_run), encoding="utf-8")
+    out.write_text(to_python(steps, dry_run=dry_run, confidence=confidence),
+                   encoding="utf-8")
     return out

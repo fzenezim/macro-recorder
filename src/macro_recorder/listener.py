@@ -433,7 +433,12 @@ class EventCollector:
             nn = f"{self._step_counter:02d}"
             assets = self._out_dir / "assets"
             out = assets / f"a{nn}.png"
-            _, chosen, saved = make_cascading_crops(step.x, step.y, out_path=out)
+            _, chosen, saved, crop_off = make_cascading_crops(
+                step.x, step.y, out_path=out
+            )
+            # offset do clique DENTRO do crop escolhido — replay clica em
+            # top_left + offset (ponto exato), não no centro do crop.
+            step.crop_off = (int(crop_off[0]), int(crop_off[1]))
             # salva relativo ao out_dir (replay.py usa BASE/assets/...)
             step.crop = str(
                 chosen.relative_to(self._out_dir)
@@ -594,7 +599,21 @@ class Recorder:
         # do hotkey sem depender de eventos de teclado reais (pynput injetados
         # não são vistos pelo hook global do mesmo processo no Windows).
         self._toggle_event: threading.Event = threading.Event()
+        # start-when-ready: setado por run() quando o listener pynput (F9
+        # global) já está instalado. A GUI espera este event antes de
+        # disparar o 1º F9 programático — elimina a race que fazia o F9
+        # de PARAR deixar de funcionar (toggle aplicado antes do hook existir).
+        self._ready: threading.Event = threading.Event()
         self._running = False
+
+    def wait_ready(self, timeout: float = 6.0) -> bool:
+        """Espera o listener pynput (hotkey global) estar ativo.
+
+        True se ficou pronto dentro do timeout, False senão. A GUI chama
+        isto antes do toggle programático do 1º F9 para garantir que o
+        hook de teclado já existe quando a gravação liga.
+        """
+        return self._ready.wait(timeout)
 
     def toggle(self) -> bool:
         """Aciona o toggle do hotkey (mesmo efeito de apertar F9).
@@ -819,12 +838,16 @@ class Recorder:
         hk = (self._collector._hotkey or "f9").upper()
         print(f"[mrec] pressionando {hk} LIGA a gravação; 2ª {hk} PARA.  Ctrl+C cancela.", flush=True)
         self._running = True
+        self._ready.clear()
 
         with keyboard.Listener(on_press=self._on_key_press,
                                on_release=self._on_key_release) as kl, \
              mouse.Listener(on_move=self._on_mouse_move,
                             on_click=self._on_mouse_click,
                             on_scroll=self._on_mouse_scroll) as ml:
+            # hook pynput instalado — agora é seguro processar toggle
+            # programático (F9). A GUI (wait_ready) observa este set.
+            self._ready.set()
             # loop de controle: sai quando o usuário ligou E parou
             while True:
                 _t.sleep(0.1)

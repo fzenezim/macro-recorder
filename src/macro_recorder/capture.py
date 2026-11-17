@@ -179,7 +179,7 @@ def make_cascading_crops(
     base_margin: int = CROP_MARGIN,
     max_margin: int = CROP_MAX_MARGIN,
     min_unique: int = CROP_MIN_UNIQUE,
-) -> Tuple[Tuple[int, int, int, int], Path, list]:
+) -> Tuple[Tuple[int, int, int, int], Path, list, Tuple[int, int]]:
     """Cria crops em cascata de tamanho crescente ao redor de (x, y).
 
     Começa com base_margin (60px -> 120x120). Se a imagem tiver menos que
@@ -187,7 +187,11 @@ def make_cascading_crops(
     com o dobro da margem (120px -> 240x240), depois 3x (180px -> 360x360).
 
     Para cada tentativa, salva em out_path, _b, _c (etc). Retorna:
-        (region_box, chosen_path, [all_saved_paths])
+        (region_box, chosen_path, [all_saved_paths], crop_off)
+
+    `crop_off` é o offset (dx, dy) do PUNTO DE CLIQUE dentro do crop
+    escolhido — usado no replay para clicar no ponto exato gravado
+    (top_left_do_crop + crop_off) em vez do centro geométrico.
 
     O listener deve usar `chosen_path` como o crop principal (a maior que
     ainda tem cores únicas suficientes) e todas as demais como fallback.
@@ -244,10 +248,13 @@ def make_cascading_crops(
             test_img.close()
 
         if unique >= min_unique:
-            return region, out, saved
+            # offset do PUNTO DE CLIQUE dentro do crop escolhido (clamped)
+            off = (x - L, y - T)
+            return region, out, saved, off
 
     # se nada teve cores suficientes, usa a maior (última salva)
-    return region, saved[-1] if saved else out, saved
+    off = (x - L, y - T)
+    return region, (saved[-1] if saved else out), saved, off
 
 
 def make_crop(

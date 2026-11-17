@@ -566,13 +566,16 @@ class MacroRecorderApp(ctk.CTk):
         )
         # ── minimizar a GUI durante a gravação ───────────────────────────
         # A macro manipula o mouse/teclado reais; a janela da GUI fica na
-        # frente e atrapalha (vira âncora no matching). Minimizamos agora
-        # e restauramos em _record_finished.
+        # frente e atrapalha (vira âncora no matching). Minimizamos de
+        # VERDADE (iconify → ícone na taskbar, o usuário ainda vê e pode
+        # restaurar) e restauramos em _record_finished.
+        # ANTES usávamos o state "withdrawn" (sem aspas aqui para o teste
+        # de regressão não confundi...[truncated]
         self._minimized_for_record = False
         try:
-            self.state("withdrawn")
+            self.iconify()
             self._minimized_for_record = True
-            self._emit_log("[record] GUI minimizada durante a gravação")
+            self._emit_log("[record] GUI minimizada (ícone na taskbar) durante a gravação")
         except Exception:
             self._emit_log("[record] ⚠ não consegui minimizar a GUI")
         self._emit_status("recording")
@@ -595,7 +598,13 @@ class MacroRecorderApp(ctk.CTk):
                 from macro_recorder import exporter_py as pyexp
                 steps = recording.steps
                 md.export_md(recording, steps, out_dir / "passo-a-passo.md")
-                pyexp.export_py(steps, out_dir / "replay.py")
+                # confiança escolhida na GUI vira a cascata do replay
+                # (floor 0.8 no exporter)
+                try:
+                    conf = float(self.opt_conf.get())
+                except Exception:
+                    conf = 0.9
+                pyexp.export_py(steps, out_dir / "replay.py", confidence=conf)
                 crops = sum(1 for s in steps if s.crop)
                 self._emit_log(f"[record] ✅ {len(steps)} passos salvos em {out_dir}/")
                 self._emit_log(
@@ -631,8 +640,36 @@ class MacroRecorderApp(ctk.CTk):
         self._rec_worker.start()
         self.btn_record.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        # LIGA a gravação imediatamente (toggle programático = 1º F9)
-        rec.toggle()
+        # LIGA a gravação (toggle programático = 1º F9) APENAS quando o
+        # hook pynput (F9 global) já está instalado — elimina a race que
+        # fazia o F9 de PARAR deixar de funcionar.
+        self._start_retries = 0
+        self._start_when_ready(rec)
+
+    def _start_when_ready(self, rec):
+        """Dispara o 1º F9 programático quando o listener pynput está ativo.
+
+        Poll via after() (não bloqueia o mainloop): enquanto o hook global
+        ainda não existir, adiar 50ms. Após ~6s desiste e dispara mesmo
+        assim (o _toggle_event é sticky — o loop do run() o consome).
+        """
+        ready = False
+        try:
+            ready = rec._ready.is_set()
+        except Exception:
+            ready = False
+        if ready:
+            rec.toggle()
+            return
+        self._start_retries += 1
+        if self._start_retries > 120:
+            self._emit_log(
+                "[record] ⚠ hook de teclado não confirmou pronto em 6s — "
+                "iniciando mesmo assim."
+            )
+            rec.toggle()
+            return
+        self.after(50, lambda: self._start_when_ready(rec))
 
     def _record_finished(self, code: int):
         # restaura a GUI (se foi minimizada para a gravação)
@@ -722,15 +759,21 @@ class MacroRecorderApp(ctk.CTk):
         self._minimized_for_replay = False
         if not dry:
             try:
-                self.state("withdrawn")  # some da tela (equivalente minimize)
+                self.iconify()  # minimiza de verdade (ícone na taskbar)
                 self._minimized_for_replay = True
-                self._rlog("[replay] GUI minimizada durante a reprodução")
+                self._rlog("[replay] GUI minimizada (ícone na taskbar) durante a reprodução")
             except Exception:
                 self._rlog("[replay] ⚠ não consegui minimizar a GUI")
         else:
             self._rlog("[replay] dry-run: GUI permanece visível")
 
         env = os.environ.copy()
+        # pausa entre passos (checkbox "Pausar 1s entre passos") → replay lê
+        # a var MREC_PAUSE no cabeçalho gerado
+        try:
+            env["MREC_PAUSE"] = "1" if self.chk_pause.get() else "0"
+        except Exception:
+            env["MREC_PAUSE"] = "0"
         from macro_recorder._host_runtime import runtime_python
         host_py = runtime_python()
         args = [str(host_py), "-m", "macro_recorder", "replay", str(rec_dir)]
