@@ -35,7 +35,7 @@ def get_monitors() -> list:
         sz = pyautogui.size()
         return [{"left": 0, "top": 0, "width": sz[0], "height": sz[1],
                  "is_primary": True, "name": "primary"}]
-    with mss.mss() as sct:
+    with mss.MSS() as sct:
         # sct.monitors[0] é o virtual box de todos; ignora
         return [m for m in sct.monitors[1:]]
 
@@ -74,7 +74,7 @@ def capture_monitor(monitor_index: int = 0, *, out_path: None = None):
     idx = min(monitor_index, len(monitors) - 1)
     mon = monitors[idx]
 
-    with mss.mss() as sct:
+    with mss.MSS() as sct:
         mon_data = sct.monitors[1 + idx]  # mss index: 0=virtual, 1=first monitor
         img = sct.grab(mon_data)
         from mss.tools import to_png

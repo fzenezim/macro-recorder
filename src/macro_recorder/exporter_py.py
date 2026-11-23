@@ -48,7 +48,9 @@ def _tpl_header(n_steps, duration_s, generated_at):
 
 def _tpl_helpers(confs=(0.9, 0.8)):
     confs_repr = repr(tuple(confs))
-    body = '''
+    # r''' (raw): o template contém um regex r"\{...\}" — sem o prefixo raw
+    # o Python tratava '\{' como escape inválido (DeprecationWarning).
+    body = r'''
 def _locate(crop, off=None, confs=__CONFS__):
     """Localiza a crop na tela e devolve o ponto EXATO do clique.
 
